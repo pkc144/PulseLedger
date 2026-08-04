@@ -4,30 +4,32 @@
 
 PulseLedger is a correctness-first payment ledger implemented as a **modular monolith** backed by one PostgreSQL database. This document is the implementation contract for new project work. [PROJECT_PLAN.md](../PROJECT_PLAN.md) defines delivery order and scope; this document defines boundaries and dependency direction.
 
-The repository currently implements the foundation and account API. Ledger posting, serializable transfers, idempotency, outbox processing, reconciliation, and benchmarks remain planned work and must be added incrementally through the boundaries below.
+The repository currently implements the foundation, account API, immutable double-entry journal, treasury funding, and serializable customer transfers. Idempotency, outbox processing, reconciliation, and benchmarks remain planned work and must be added incrementally through the boundaries below.
 
-## System context
+## Current system context
 
 ```text
 API client
     |
-    | HTTP + request ID; Idempotency-Key on transfer commands
+    | HTTP + request ID; Idempotency-Key added in Week 4
     v
 Fastify application (single deployable process)
     |
     | feature ports and transaction-oriented use cases
     v
 PostgreSQL (single source of durable state)
-    |
-    | claimed outbox rows
-    v
-Worker entrypoint in the same repository
-    |
-    v
-Consumer inbox and audit effects
+    |- accounts and cached balances
+    |- immutable ledger transactions and journal entries
+    `- completed transfer projections
 ```
 
 PostgreSQL constraints and transactions enforce financial invariants. The immutable journal will be the source of truth; `accounts.balance_minor` is only a transactional cache. No Redis, message broker, microservice split, or direct balance-editing path belongs in v1.
+
+The planned Week 5–6 extension keeps the same process and database boundary:
+
+```text
+committed PostgreSQL outbox -> repository worker entrypoint -> consumer inbox + audit effect
+```
 
 ## Code organization and dependency direction
 
@@ -39,58 +41,89 @@ composition root: app.ts (constructs adapters and injects ports)
                          |
               +----------+----------+
               v                     v
-     feature HTTP adapters    operational adapters
-        *-routes.ts              health routes
-              |                     |
-              v                     v
-       feature contracts       shared ports
-        *-domain.ts          ports/database.ts
-              ^                     ^
-              |                     |
-       persistence adapters --------+
-       *-repository.ts
-              |
-              v
-       PostgreSQL / explicit SQL
+       feature HTTP adapters       operational adapters
+          *-routes.ts                 health routes
+                |                         |
+                v                         v
+     application port/interface       shared ports
+          *-domain.ts              ports/database.ts
+                ^                         ^
+                |                         |
+       *-service.ts implementation        |
+                |                         |
+                v                         |
+       feature persistence port          |
+                ^                         |
+                |                         |
+       *-repository.ts adapter -----------+
+                |
+                v
+         PostgreSQL / explicit SQL
 ```
 
 - `src/modules/<feature>/` owns a vertical feature slice: domain types and ports, application behavior, HTTP adapters, and feature-specific persistence.
-- `*-domain.ts` contains framework-independent domain values and port interfaces. It must not depend on Fastify, `pg`, or shared infrastructure.
-- `*-routes.ts` is an inbound HTTP adapter. It validates transport data and calls an injected domain/application port; it never constructs or imports a repository.
+- `*-domain.ts` contains framework-independent domain values, errors, and port interfaces. It must not depend on Fastify, `pg`, shared infrastructure, or HTTP status semantics.
+- `*-service.ts` implements application behavior using injected feature ports. It cannot import routes, repositories, or infrastructure.
+- `*-routes.ts` is an inbound HTTP adapter. It validates transport data and calls an injected application interface from `*-domain.ts`; it never imports a concrete service or repository.
 - `*-repository.ts` is an outbound persistence adapter. It implements a feature-owned port with explicit SQL and may depend on the generic database port.
 - `src/ports/` contains small technology-neutral boundaries shared by multiple features. It must not become a miscellaneous utility directory.
 - `src/infrastructure/` owns generic technology setup such as the PostgreSQL pool and migration runner. It does not own business rules and cannot depend on feature modules.
 - `src/app.ts` is the HTTP composition root. It is allowed to know concrete adapters and wires them to routes.
 - `src/server.ts` and other process entrypoints load configuration, acquire resources, start work, and shut resources down. Business behavior does not live there.
 
-Feature-to-feature dependencies are exceptional. When required, a feature may import only another feature's `*-domain.ts` contract, never its routes or repository. Cross-feature workflows should be coordinated by an application service with dependencies injected through ports.
+Feature-to-feature dependencies are exceptional. Non-domain code may import only another feature's `*-domain.ts` contract, never its routes, service, or repository. A `*-domain.ts` file itself stays wholly inside its feature. Cross-feature workflows are coordinated by application services through injected ports or shared database invariants.
 
-Run `npm run architecture:check` to enforce these dependency rules. The command is also part of the main verification gate and CI.
+Run `npm run architecture:check` to enforce these dependency rules. The checker rejects framework/transport leakage into domain files, route-to-service/repository coupling, service-to-adapter coupling, repository-to-inbound coupling, feature dependencies from infrastructure/shared ports, and non-contract cross-feature imports. The command is also part of the main verification gate and CI.
 
 ## Runtime flows
 
 ### Current account request
 
 ```text
-request -> account route -> AccountStore port -> PostgresAccountStore -> PostgreSQL
-        <- JSON schema <- Account domain model <- row mapping          <- result
+request -> account route -> AccountApplication -> AccountService -> AccountStore port
+        <- JSON schema  <- Account domain model  <- PostgresAccountStore <- PostgreSQL
 ```
 
 The route owns HTTP status codes and schemas. The repository owns SQL and row mapping. The domain contract keeps those concerns independently testable.
 
-### Future monetary command
+### Current treasury-funding command
 
-A transfer or treasury-funding request must execute as one use-case-owned PostgreSQL transaction:
+```text
+request -> ledger route -> LedgerPostingService -> LedgerStore port
+                        -> money + balance validation
+                        -> PostgreSQL posting function
+                           |- lock accounts in UUID order
+                           |- insert transaction and two entries
+                           |- update both cached balances
+                           `- finalize the transaction
+```
 
-1. Validate authentication, schema, currency, amount, and idempotency metadata before mutation.
-2. Begin a `SERIALIZABLE` transaction and claim or replay the idempotency record.
-3. Lock accounts in deterministic ID order and validate account state and funds.
-4. Insert one ledger transaction and balanced, immutable journal entries.
-5. Update cached balances from the same amounts.
-6. Insert the outbox event and completed stable response.
-7. Commit once; retry only recognized serialization/deadlock failures with a documented bound.
+The database function executes as one PostgreSQL statement and therefore one atomic transaction when called by the API. Composite foreign keys enforce one currency across the transaction, entries, and accounts. Deferred constraint triggers verify the final debit and credit totals at commit. Finalization prevents later entries, while mutation triggers reject updates and deletes.
 
-No route or repository may split those steps across independent transactions. The application use case owns the transaction boundary; repositories execute using the injected transaction-scoped database interface.
+Asset-account directions are explicit: a debit increases an account balance and a credit decreases it. Treasury funding therefore debits the customer and credits the treasury by the same positive minor-unit amount.
+
+### Current transfer command
+
+A transfer request executes through a service-owned bounded attempt loop:
+
+1. Validate the HTTP schema, positive integer amount, and distinct account IDs before mutation.
+2. Begin a `SERIALIZABLE` PostgreSQL transaction.
+3. Lock both accounts in ascending UUID order and validate their current status, currency, and source balance.
+4. Insert one ledger transaction, equal credit/debit journal entries, cached balance updates, and the stable transfer record.
+5. Commit once.
+6. Retry only SQLSTATE `40001` serialization failures and `40P01` deadlocks, using at most 12 attempts with exponential backoff, 50–100% jitter, and a 50 ms delay cap.
+
+Each attempt reloads and validates the locked account state. A failed attempt rolls back before the same transfer ID and reference are retried. Business errors such as insufficient funds are never retried. Retry counts and elapsed time are emitted in structured logs; in-process counters track completed transfers, retries, and exhausted budgets.
+
+The transfer row, journal, and cached balances are committed atomically. `GET /v1/transfers/:id` reads the transfer and immutable ledger reference as one stable representation.
+
+The `transfers` table is a transfer-specific projection, not a second source of financial truth. A composite foreign key requires its ID, currency, and fixed `transfer` ledger type to match one `ledger_transactions` row. Creation time and reference are read from that ledger row rather than duplicated in the projection.
+
+### Future idempotent monetary command
+
+Week 4 extends the transaction boundary to claim or replay an idempotency record before mutation and to commit its stable response atomically with the transfer. Week 5 adds the outbox row to that same commit.
+
+No route may split monetary steps across independent transactions. The application use case owns the transaction lifecycle through an injected store; persistence executes SQL using one transaction-scoped database connection.
 
 ### Future outbox processing
 
@@ -98,7 +131,7 @@ The API transaction writes an outbox record but performs no external side effect
 
 ## Data and correctness rules
 
-These rules outrank convenience and performance:
+These rules outrank convenience and performance. Rules 1–5 are enforced now; rules 6–8 are target invariants delivered in Weeks 4–6.
 
 1. Monetary values are integer minor units in PostgreSQL `bigint`; JSON exposes them as decimal strings.
 2. Every posted ledger transaction has total debits equal to total credits in one currency.
@@ -111,10 +144,29 @@ These rules outrank convenience and performance:
 
 Enforce an invariant in PostgreSQL whenever practical, then test it at the database boundary. TypeScript validation alone is not a sufficient financial control.
 
+### Current durable model
+
+```text
+accounts (identity, status, cached balance)
+    ^                              ^
+    | account + currency FK        | source/destination + currency FK
+    |                              |
+journal_entries * -------- 1 ledger_transactions 1 -------- 0..1 transfers
+       immutable              immutable/finalized             immutable
+       debit or credit        type + currency + reference     transfer projection
+```
+
+- `ledger_transactions` plus `journal_entries` is the authoritative financial record.
+- `accounts.balance_minor` is updated in the same transaction and can later be reconciled from entries.
+- Composite foreign keys prevent mixed-currency entries and transfer projections.
+- Deferred balance triggers reject non-finalized, one-sided, or unequal postings at commit.
+- Mutation/finalization triggers prevent changes to committed ledger history.
+
 ## API and failure contract
 
 - Fastify JSON schemas reject malformed transport input.
-- Expected failures use `AppError` with a stable machine code and safe message.
+- Domain errors contain only a stable machine code and safe message. The HTTP error adapter owns the explicit code-to-status mapping; domain and application code never carry HTTP status codes.
+- Route-local HTTP failures may use `AppError` because the route is already a transport adapter.
 - Every error response includes the request ID; unexpected errors are logged and return `INTERNAL_ERROR` without leaking details.
 - Domain/application code must not depend on Fastify reply objects or status codes.
 - Liveness reports process health without querying PostgreSQL. Readiness verifies required dependencies.
@@ -125,7 +177,7 @@ Enforce an invariant in PostgreSQL whenever practical, then test it at the datab
 - Unit tests exercise domain/application behavior through in-memory port implementations.
 - Integration tests use real PostgreSQL migrations and verify SQL, constraints, transaction behavior, and repositories.
 - Property tests prove balanced-entry and amount invariants across generated cases.
-- Concurrency tests use independent database connections and synchronized starts.
+- Concurrency tests use independent pooled database connections and concurrently issued requests.
 - Recovery tests stop and restart workers around durable state transitions.
 - End-to-end tests cover stable HTTP behavior and replay semantics.
 
@@ -135,9 +187,10 @@ A feature is complete only when its relevant rejection, concurrency, and failure
 
 1. Define domain values and the smallest required ports in `src/modules/<feature>/*-domain.ts`.
 2. Put orchestration and transaction ownership in an application service within that feature.
-3. Implement feature-specific SQL behind the port in `*-repository.ts`.
-4. Add a schema-validating `*-routes.ts` adapter that accepts the application port by injection.
-5. Wire concrete adapters only in a composition root or process entrypoint.
-6. Add migrations and tests that demonstrate the invariants, then update this document if the architecture contract changes.
+3. Implement the application interface in `*-service.ts` using injected ports.
+4. Implement feature-specific SQL behind the persistence port in `*-repository.ts`.
+5. Add a schema-validating `*-routes.ts` adapter that accepts the application port by injection.
+6. Wire concrete services and adapters only in a composition root or process entrypoint.
+7. Add migrations and tests that demonstrate the invariants, then update this document if the architecture contract changes.
 
 Material architectural decisions should be recorded in `docs/adr/` when their planned delivery gate is reached. In particular, the project plan calls for ADRs covering double-entry integer accounting, serializable locking/retries, the transactional outbox, and the modular-monolith worker boundary.

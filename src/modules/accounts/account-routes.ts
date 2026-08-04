@@ -1,10 +1,10 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { AppError } from '../../errors.js';
-import type { AccountStore, SupportedCurrency } from './account-domain.js';
+import type { AccountApplication, SupportedCurrency } from './account-domain.js';
 import { supportedCurrencies } from './account-domain.js';
 
 interface AccountRouteOptions {
-  store: AccountStore;
+  service: AccountApplication;
 }
 
 const accountResponseSchema = {
@@ -35,7 +35,7 @@ export const accountRoutes: FastifyPluginAsync<AccountRouteOptions> = async (app
       },
     },
     async (request, reply) => {
-      const account = await options.store.create({ currency: request.body.currency });
+      const account = await options.service.create({ currency: request.body.currency });
       return reply.status(201).send(account);
     },
   );
@@ -54,7 +54,7 @@ export const accountRoutes: FastifyPluginAsync<AccountRouteOptions> = async (app
       },
     },
     async (request) => {
-      const account = await options.store.findById(request.params.id);
+      const account = await options.service.findById(request.params.id);
       if (!account) throw new AppError('ACCOUNT_NOT_FOUND', 404, 'Account not found');
       return account;
     },

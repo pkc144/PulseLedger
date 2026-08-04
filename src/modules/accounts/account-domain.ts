@@ -17,3 +17,8 @@ export interface AccountStore {
   create(input: CreateAccountInput): Promise<Account>;
   findById(id: string): Promise<Account | null>;
 }
+
+export interface AccountApplication {
+  create(input: CreateAccountInput): Promise<Account>;
+  findById(id: string): Promise<Account | null>;
+}

@@ -43,6 +43,10 @@ for (const source of files) {
   const sourceFeature = featureName(source);
   const contents = await readFile(source, 'utf8');
 
+  if (sourceName.endsWith('-domain.ts') && /\bstatusCode\b/.test(contents)) {
+    record(violations, source, 'statusCode', 'domain code cannot own HTTP status semantics');
+  }
+
   for (const match of contents.matchAll(importPattern)) {
     const specifier = match[1];
     if (!specifier) continue;
@@ -57,6 +61,15 @@ for (const source of files) {
 
     const targetName = relativeName(target);
     const targetFeature = featureName(target);
+
+    if (
+      sourceName.endsWith('-domain.ts') &&
+      (targetName.endsWith('-routes.ts') ||
+        targetName.endsWith('-repository.ts') ||
+        targetName.endsWith('-service.ts'))
+    ) {
+      record(violations, source, specifier, 'domain code cannot depend on adapters or services');
+    }
 
     if (sourceName.startsWith('src/infrastructure/') && targetFeature) {
       record(violations, source, specifier, 'shared infrastructure cannot depend on a feature');
@@ -73,19 +86,56 @@ for (const source of files) {
       }
     }
 
-    if (sourceName.endsWith('-routes.ts')) {
-      if (targetName.startsWith('src/infrastructure/') || targetName.endsWith('-repository.ts')) {
+    if (sourceName.startsWith('src/ports/')) {
+      if (targetFeature || targetName.startsWith('src/infrastructure/')) {
         record(
           violations,
           source,
           specifier,
-          'HTTP adapters must use ports, not persistence adapters',
+          'shared ports cannot depend on features or infrastructure',
         );
       }
     }
 
-    if (sourceName.endsWith('-repository.ts') && targetName.endsWith('-routes.ts')) {
-      record(violations, source, specifier, 'persistence adapters cannot depend on HTTP adapters');
+    if (sourceName.endsWith('-routes.ts')) {
+      if (
+        targetName.startsWith('src/infrastructure/') ||
+        targetName.endsWith('-repository.ts') ||
+        targetName.endsWith('-service.ts')
+      ) {
+        record(
+          violations,
+          source,
+          specifier,
+          'HTTP adapters must use domain/application ports, not concrete services or persistence',
+        );
+      }
+    }
+
+    if (
+      sourceName.endsWith('-service.ts') &&
+      (targetName.startsWith('src/infrastructure/') ||
+        targetName.endsWith('-repository.ts') ||
+        targetName.endsWith('-routes.ts'))
+    ) {
+      record(
+        violations,
+        source,
+        specifier,
+        'application services must depend on ports, not concrete adapters',
+      );
+    }
+
+    if (
+      sourceName.endsWith('-repository.ts') &&
+      (targetName.endsWith('-routes.ts') || targetName.endsWith('-service.ts'))
+    ) {
+      record(
+        violations,
+        source,
+        specifier,
+        'persistence adapters cannot depend on HTTP adapters or services',
+      );
     }
   }
 }

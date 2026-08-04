@@ -1,10 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../../src/app.js';
-import type { Database, QueryResult } from '../../src/ports/database.js';
+import type {
+  DatabaseConnection,
+  QueryResult,
+  TransactionalDatabase,
+} from '../../src/ports/database.js';
 
-class StubDatabase implements Database {
+class StubDatabase implements TransactionalDatabase, DatabaseConnection {
   public shouldFail = false;
+
+  public async connect(): Promise<DatabaseConnection> {
+    return this;
+  }
+
+  public release(): void {}
 
   public async query<Row extends Record<string, unknown>>(
     text: string,

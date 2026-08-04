@@ -15,3 +15,11 @@ export interface Database {
     values?: readonly unknown[],
   ): Promise<QueryResult<Row>>;
 }
+
+export interface DatabaseConnection extends Database {
+  release(): void;
+}
+
+export interface TransactionalDatabase extends Database {
+  connect(): Promise<DatabaseConnection>;
+}

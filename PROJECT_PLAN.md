@@ -222,28 +222,28 @@ Implement the accounting core and enforce balanced, immutable postings.
 
 ### Tasks
 
-- [ ] Implement a money value object using integer minor units.
-- [ ] Add ledger transaction and journal entry migrations.
-- [ ] Define debit and credit directions clearly.
-- [ ] Implement the balanced posting service.
-- [ ] Reject zero, negative, unsafe, and out-of-range amounts.
-- [ ] Reject mixed-currency postings.
-- [ ] Enforce append-only journal entries using database permissions or triggers.
-- [ ] Add database constraints for positive amounts and valid directions.
-- [ ] Implement treasury-to-account funding as a balanced posting.
-- [ ] Add domain error codes and transaction references.
-- [ ] Add unit tests for money and posting validation.
-- [ ] Add fast-check properties for generated balanced and invalid postings.
-- [ ] Write ADR-001: double-entry accounting and integer minor units.
+- [x] Implement a money value object using integer minor units.
+- [x] Add ledger transaction and journal entry migrations.
+- [x] Define debit and credit directions clearly.
+- [x] Implement the balanced posting service.
+- [x] Reject zero, negative, unsafe, and out-of-range amounts.
+- [x] Reject mixed-currency postings.
+- [x] Enforce append-only journal entries using database permissions or triggers.
+- [x] Add database constraints for positive amounts and valid directions.
+- [x] Implement treasury-to-account funding as a balanced posting.
+- [x] Add domain error codes and transaction references.
+- [x] Add unit tests for money and posting validation.
+- [x] Add fast-check properties for generated balanced and invalid postings.
+- [x] Write ADR-001: double-entry accounting and integer minor units.
 
 ### Verification
 
-- [ ] Every valid posting has equal debits and credits.
-- [ ] An unbalanced posting is rejected atomically.
-- [ ] Journal updates and deletes are rejected.
-- [ ] No code path stores floating-point money.
-- [ ] Funding changes both treasury and customer balances through journal entries.
-- [ ] The sum of balances for a closed test system remains conserved.
+- [x] Every valid posting has equal debits and credits.
+- [x] An unbalanced posting is rejected atomically.
+- [x] Journal updates and deletes are rejected.
+- [x] No code path stores floating-point money.
+- [x] Funding changes both treasury and customer balances through journal entries.
+- [x] The sum of balances for a closed test system remains conserved.
 
 ### Week 2 deliverable
 
@@ -257,27 +257,27 @@ Transfer value safely without overdrafts or partial postings under concurrent lo
 
 ### Tasks
 
-- [ ] Implement source, destination, status, amount, and currency validation.
-- [ ] Reject self-transfers and cross-currency transfers.
-- [ ] Lock involved accounts in deterministic ID order.
-- [ ] Run transfer posting inside a `SERIALIZABLE` transaction.
-- [ ] Update cached balances and journal entries atomically.
-- [ ] Enforce the insufficient-funds rule.
-- [ ] Detect serialization failures and retry with bounded exponential backoff and jitter.
-- [ ] Expose retry attempt counts in structured logs and internal metrics.
-- [ ] Implement transfer lookup.
-- [ ] Test opposing transfers, hot accounts, and overspend races using real PostgreSQL.
-- [ ] Add a reference model comparison test.
-- [ ] Write ADR-002: serializable isolation, locking, and bounded retries.
+- [x] Implement source, destination, status, amount, and currency validation.
+- [x] Reject self-transfers and cross-currency transfers.
+- [x] Lock involved accounts in deterministic ID order.
+- [x] Run transfer posting inside a `SERIALIZABLE` transaction.
+- [x] Update cached balances and journal entries atomically.
+- [x] Enforce the insufficient-funds rule.
+- [x] Detect serialization failures and retry with bounded exponential backoff and jitter.
+- [x] Expose retry attempt counts in structured logs and internal metrics.
+- [x] Implement transfer lookup.
+- [x] Test opposing transfers, hot accounts, and overspend races using real PostgreSQL.
+- [x] Add a reference model comparison test.
+- [x] Write ADR-002: serializable isolation, locking, and bounded retries.
 
 ### Verification
 
-- [ ] Insufficient funds creates no partial transaction or journal entries.
-- [ ] Concurrent withdrawals cannot make a customer account negative.
-- [ ] Opposing transfers preserve the total amount.
-- [ ] Account lock order is deterministic.
-- [ ] Retry count and elapsed time are bounded.
-- [ ] Final database state matches the sequential reference model.
+- [x] Insufficient funds creates no partial transaction or journal entries.
+- [x] Concurrent withdrawals cannot make a customer account negative.
+- [x] Opposing transfers preserve the total amount.
+- [x] Account lock order is deterministic.
+- [x] Retry count and elapsed time are bounded.
+- [x] Final database state matches the sequential reference model.
 
 ### Week 3 deliverable
 
@@ -514,16 +514,16 @@ A polished, reproducible `v1.0.0` release with implementation, tests, benchmarks
 
 Update this table at the end of every implementation session.
 
-| Week                        | Status      | Completion | Gate result | Notes                                              |
-| --------------------------- | ----------- | ---------: | ----------- | -------------------------------------------------- |
-| 1 — Foundation              | Complete    |       100% | Passed      | 15 automated tests and local API smoke test passed |
-| 2 — Journal                 | Not started |         0% | Pending     |                                                    |
-| 3 — Transfers               | Not started |         0% | Pending     |                                                    |
-| 4 — Idempotency             | Not started |         0% | Pending     |                                                    |
-| 5 — Outbox                  | Not started |         0% | Pending     |                                                    |
-| 6 — Consumer/reconciliation | Not started |         0% | Pending     |                                                    |
-| 7 — Quality/benchmark       | Not started |         0% | Pending     |                                                    |
-| 8 — Release                 | Not started |         0% | Pending     |                                                    |
+| Week                        | Status      | Completion | Gate result | Notes                                                       |
+| --------------------------- | ----------- | ---------: | ----------- | ----------------------------------------------------------- |
+| 1 — Foundation              | Complete    |       100% | Passed      | 15 automated tests and local API smoke test passed          |
+| 2 — Journal                 | Complete    |       100% | Passed      | Immutable balanced journal and funding gate passed          |
+| 3 — Transfers               | Complete    |       100% | Passed      | Concurrency, reference-model, and architecture gates passed |
+| 4 — Idempotency             | Not started |         0% | Pending     |                                                             |
+| 5 — Outbox                  | Not started |         0% | Pending     |                                                             |
+| 6 — Consumer/reconciliation | Not started |         0% | Pending     |                                                             |
+| 7 — Quality/benchmark       | Not started |         0% | Pending     |                                                             |
+| 8 — Release                 | Not started |         0% | Pending     |                                                             |
 
 Allowed status values: `Not started`, `In progress`, `Blocked`, and `Complete`.
 

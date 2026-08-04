@@ -11,6 +11,35 @@ export class AppError extends Error {
   }
 }
 
+const domainErrorStatus = {
+  ACCOUNT_NOT_ACTIVE: 409,
+  ACCOUNT_NOT_FOUND: 404,
+  CURRENCY_MISMATCH: 400,
+  INSUFFICIENT_FUNDS: 409,
+  INVALID_AMOUNT: 400,
+  INVALID_POSTING: 400,
+  MIXED_CURRENCY_POSTING: 400,
+  SELF_TRANSFER: 400,
+  TRANSFER_NOT_FOUND: 404,
+  TRANSFER_RETRY_EXHAUSTED: 503,
+  TREASURY_NOT_FOUND: 500,
+  UNBALANCED_POSTING: 400,
+} as const;
+
+type DomainErrorCode = keyof typeof domainErrorStatus;
+
+interface DomainError extends Error {
+  code: DomainErrorCode;
+}
+
+function isDomainError(error: Error): error is DomainError {
+  return (
+    'code' in error &&
+    typeof error.code === 'string' &&
+    Object.hasOwn(domainErrorStatus, error.code)
+  );
+}
+
 export interface ErrorResponse {
   error: {
     code: string;
@@ -34,6 +63,13 @@ export function errorHandler(error: Error, request: FastifyRequest, reply: Fasti
         message: 'Request validation failed',
         requestId: request.id,
       },
+    } satisfies ErrorResponse);
+    return;
+  }
+
+  if (isDomainError(error)) {
+    void reply.status(domainErrorStatus[error.code]).send({
+      error: { code: error.code, message: error.message, requestId: request.id },
     } satisfies ErrorResponse);
     return;
   }
