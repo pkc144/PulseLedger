@@ -2,7 +2,7 @@
 
 PulseLedger is a correctness-first payment ledger designed to remain safe under concurrent transfers, request retries, and worker failures.
 
-This repository has completed **Week 3: serializable transfers and concurrency**. The detailed execution plan is in [PROJECT_PLAN.md](./PROJECT_PLAN.md), and all implementation work follows [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
+This repository has completed **Week 4: request idempotency**. The detailed execution plan is in [PROJECT_PLAN.md](./PROJECT_PLAN.md), and all implementation work follows [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 
 ## Requirements
 
@@ -64,8 +64,11 @@ Transfer funds between two active accounts with the same currency:
 ```bash
 curl -X POST http://localhost:3000/v1/transfers \
   -H 'content-type: application/json' \
+  -H 'idempotency-key: my-unique-key' \
   -d '{"sourceAccountId":"SOURCE_ID","destinationAccountId":"DESTINATION_ID","amountMinor":"2500"}'
 ```
+
+Transfers accept an optional `Idempotency-Key` header. Repeating a request with the same key and body replays the original response without creating a duplicate transfer. A different body under the same key returns `IDEMPOTENCY_CONFLICT`. Stale in-progress claims are reclaimed after 30 seconds.
 
 Retrieve the stable transfer result:
 
@@ -108,7 +111,10 @@ Integration tests use `TEST_DATABASE_URL` when supplied. Otherwise, Testcontaine
 - Transfers run at `SERIALIZABLE` isolation and lock accounts in deterministic UUID order.
 - Concurrent withdrawals cannot overdraw a customer account or create partial postings.
 - Serialization and deadlock failures use a bounded 12-attempt retry policy with capped jittered backoff.
+- Idempotency keys guarantee exactly one execution per key+operation pair with stable response replay.
+- Completed idempotency records commit atomically with the transfer inside one SERIALIZABLE transaction.
+- Stale in-progress idempotency records (default 30 s) are reclaimed by retrying requests.
 - Errors use stable machine codes and include a request ID.
 - Liveness is independent of PostgreSQL; readiness verifies a live query.
 
-Request idempotency, the transactional outbox, reconciliation, and benchmarks are delivered in later weekly gates defined by the project plan.
+The transactional outbox, reconciliation, and benchmarks are delivered in later weekly gates defined by the project plan.

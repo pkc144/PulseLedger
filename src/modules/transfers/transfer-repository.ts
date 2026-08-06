@@ -69,6 +69,7 @@ class PostgresTransferTransaction implements TransferTransaction {
     id: string;
     reference: string;
     sourceAccountId: string;
+    idempotency?: { key: string; operation: string };
   }): Promise<Transfer> {
     const transaction = await this.database.query<{ created_at: Date }>(
       `SELECT created_at
@@ -97,7 +98,8 @@ class PostgresTransferTransaction implements TransferTransaction {
         input.currency,
       ],
     );
-    return {
+
+    const transfer: Transfer = {
       amountMinor: input.amountMinor,
       createdAt: createdAt.toISOString(),
       currency: input.currency,
@@ -107,6 +109,20 @@ class PostgresTransferTransaction implements TransferTransaction {
       sourceAccountId: input.sourceAccountId,
       status: 'completed',
     };
+
+    if (input.idempotency) {
+      await this.database.query(
+        `UPDATE idempotency_records
+         SET status = 'completed',
+             response_status_code = $1,
+             response_body = $2,
+             completed_at = now()
+         WHERE key = $3 AND operation = $4 AND status = 'in_progress'`,
+        [201, transfer, input.idempotency.key, input.idempotency.operation],
+      );
+    }
+
+    return transfer;
   }
 }
 

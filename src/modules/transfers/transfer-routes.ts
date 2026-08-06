@@ -1,7 +1,9 @@
 import type { FastifyPluginAsync } from 'fastify';
+import type { IdempotencyApplication } from '../idempotency/idempotency-domain.js';
 import type { CreateTransferInput, TransferApplication } from './transfer-domain.js';
 
 interface TransferRouteOptions {
+  idempotency: IdempotencyApplication;
   service: TransferApplication;
 }
 
@@ -49,7 +51,20 @@ export const transferRoutes: FastifyPluginAsync<TransferRouteOptions> = async (a
       },
     },
     async (request, reply) => {
-      const transfer = await options.service.create(request.body);
+      const idempotencyKey = request.headers['idempotency-key'];
+      const key =
+        typeof idempotencyKey === 'string' && idempotencyKey.length > 0
+          ? idempotencyKey
+          : undefined;
+
+      if (key) {
+        const replay = await options.idempotency.claimOrReplay(key, 'transfer', request.body);
+        if (replay) {
+          return reply.status(replay.status).send(replay.body);
+        }
+      }
+
+      const transfer = await options.service.create(request.body, { idempotencyKey: key });
       return reply.status(201).send(transfer);
     },
   );

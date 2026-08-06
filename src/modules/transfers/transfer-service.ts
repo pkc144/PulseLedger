@@ -4,6 +4,7 @@ import {
   deterministicAccountOrder,
   TransferError,
   type CreateTransferInput,
+  type CreateTransferOptions,
   type Transfer,
   type TransferApplication,
   type TransferMetricsPort,
@@ -90,7 +91,7 @@ export class TransferService implements TransferApplication {
     return this.metrics;
   }
 
-  public async create(input: CreateTransferInput): Promise<Transfer> {
+  public async create(input: CreateTransferInput, options?: CreateTransferOptions): Promise<Transfer> {
     const amount = Money.fromMinor(input.amountMinor);
     if (input.sourceAccountId === input.destinationAccountId) {
       throw new TransferError('SELF_TRANSFER', 'Source and destination must differ');
@@ -99,6 +100,7 @@ export class TransferService implements TransferApplication {
     const transferId = randomUUID();
     const reference = `transfer:${transferId}`;
     const startedAt = this.now();
+    const idempotencyKey = options?.idempotencyKey;
 
     for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
       try {
@@ -134,6 +136,9 @@ export class TransferService implements TransferApplication {
             id: transferId,
             reference,
             sourceAccountId: source.id,
+            idempotency: idempotencyKey
+              ? { key: idempotencyKey, operation: 'transfer' }
+              : undefined,
           });
         });
 

@@ -4,7 +4,7 @@
 
 PulseLedger is a correctness-first payment ledger implemented as a **modular monolith** backed by one PostgreSQL database. This document is the implementation contract for new project work. [PROJECT_PLAN.md](../PROJECT_PLAN.md) defines delivery order and scope; this document defines boundaries and dependency direction.
 
-The repository currently implements the foundation, account API, immutable double-entry journal, treasury funding, and serializable customer transfers. Idempotency, outbox processing, reconciliation, and benchmarks remain planned work and must be added incrementally through the boundaries below.
+The repository currently implements the foundation, account API, immutable double-entry journal, treasury funding, serializable customer transfers, and request idempotency with stable response replay. Outbox processing, reconciliation, and benchmarks remain planned work and must be added incrementally through the boundaries below.
 
 ## Current system context
 
@@ -119,9 +119,16 @@ The transfer row, journal, and cached balances are committed atomically. `GET /v
 
 The `transfers` table is a transfer-specific projection, not a second source of financial truth. A composite foreign key requires its ID, currency, and fixed `transfer` ledger type to match one `ledger_transactions` row. Creation time and reference are read from that ledger row rather than duplicated in the projection.
 
-### Future idempotent monetary command
+### Current idempotent monetary command
 
-Week 4 extends the transaction boundary to claim or replay an idempotency record before mutation and to commit its stable response atomically with the transfer. Week 5 adds the outbox row to that same commit.
+An idempotent transfer request extends the transaction boundary to claim or replay an idempotency record before mutation and commits its stable response atomically with the transfer.
+
+1. The route extracts the `Idempotency-Key` header and calls the idempotency service.
+2. On first use: the key is claimed (INSERT as `in_progress`) before entering the transfer service.
+3. On replay: a completed record returns the stored status code and response body immediately.
+4. On conflict: the same key with a different payload body returns `IDEMPOTENCY_CONFLICT`.
+5. On stale detection: an `in_progress` record older than 30 seconds is atomically reclaimed.
+6. The transfer repository updates the idempotency record to `completed` inside the same `SERIALIZABLE` transaction that posts the transfer. A rollback leaves the record `in_progress` for eventual reclamation.
 
 No route may split monetary steps across independent transactions. The application use case owns the transaction lifecycle through an injected store; persistence executes SQL using one transaction-scoped database connection.
 

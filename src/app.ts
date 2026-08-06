@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { errorHandler } from './errors.js';
+import { PostgresIdempotencyStore } from './modules/idempotency/idempotency-repository.js';
+import { IdempotencyService } from './modules/idempotency/idempotency-service.js';
 import { PostgresAccountStore } from './modules/accounts/account-repository.js';
 import { accountRoutes } from './modules/accounts/account-routes.js';
 import { AccountService } from './modules/accounts/account-service.js';
@@ -46,6 +48,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     });
   });
 
+  const idempotencyStore = new PostgresIdempotencyStore(options.database);
+
   await app.register(healthRoutes, { database: options.database });
   await app.register(accountRoutes, {
     service: new AccountService(new PostgresAccountStore(options.database)),
@@ -54,6 +58,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     service: new LedgerPostingService(new PostgresLedgerStore(options.database)),
   });
   await app.register(transferRoutes, {
+    idempotency: new IdempotencyService(idempotencyStore),
     service: new TransferService(new PostgresTransferStore(options.database), {
       metrics: transferMetrics,
       telemetry: {

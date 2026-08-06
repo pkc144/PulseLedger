@@ -42,16 +42,19 @@ export interface LockedTransferAccount {
   status: 'active' | 'frozen' | 'closed';
 }
 
+export interface PostTransferInput {
+  amountMinor: string;
+  currency: string;
+  destinationAccountId: string;
+  id: string;
+  reference: string;
+  sourceAccountId: string;
+  idempotency?: { key: string; operation: string } | undefined;
+}
+
 export interface TransferTransaction {
   lockAccounts(accountIds: readonly [string, string]): Promise<readonly LockedTransferAccount[]>;
-  postTransfer(input: {
-    amountMinor: string;
-    currency: string;
-    destinationAccountId: string;
-    id: string;
-    reference: string;
-    sourceAccountId: string;
-  }): Promise<Transfer>;
+  postTransfer(input: PostTransferInput): Promise<Transfer>;
 }
 
 export interface TransferStore {
@@ -59,8 +62,12 @@ export interface TransferStore {
   runSerializable<T>(work: (transaction: TransferTransaction) => Promise<T>): Promise<T>;
 }
 
+export interface CreateTransferOptions {
+  idempotencyKey?: string | undefined;
+}
+
 export interface TransferApplication {
-  create(input: CreateTransferInput): Promise<Transfer>;
+  create(input: CreateTransferInput, options?: CreateTransferOptions): Promise<Transfer>;
   findById(id: string): Promise<Transfer>;
 }
 

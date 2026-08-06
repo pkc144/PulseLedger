@@ -291,28 +291,28 @@ Ensure client retries and simultaneous duplicate requests produce exactly one tr
 
 ### Tasks
 
-- [ ] Add the idempotency record migration and uniqueness constraints.
-- [ ] Define canonical request serialization and hashing.
-- [ ] Bind each key to its route/operation and request fingerprint.
-- [ ] Implement first-request key claiming.
-- [ ] Implement completed-response storage and replay.
-- [ ] Return a conflict for the same key with a different payload.
-- [ ] Decide and document the failed-request retention policy.
-- [ ] Implement safe behavior for concurrent in-progress requests.
-- [ ] Define stale in-progress detection and recovery behavior.
-- [ ] Ensure the completed idempotency record commits with the transfer.
-- [ ] Test a lost-response retry.
-- [ ] Test 50 identical concurrent requests against real PostgreSQL.
-- [ ] Test key reuse across different operations.
+- [x] Add the idempotency record migration and uniqueness constraints.
+- [x] Define canonical request serialization and hashing.
+- [x] Bind each key to its route/operation and request fingerprint.
+- [x] Implement first-request key claiming.
+- [x] Implement completed-response storage and replay.
+- [x] Return a conflict for the same key with a different payload.
+- [x] Decide and document the failed-request retention policy.
+- [x] Implement safe behavior for concurrent in-progress requests.
+- [x] Define stale in-progress detection and recovery behavior.
+- [x] Ensure the completed idempotency record commits with the transfer.
+- [x] Test a lost-response retry.
+- [x] Test 50 identical concurrent requests against real PostgreSQL.
+- [x] Test key reuse across different operations.
 
 ### Verification
 
-- [ ] Fifty concurrent identical requests create one ledger transaction.
-- [ ] All successful duplicate requests return the same transfer ID and response.
-- [ ] Same key with different content returns `IDEMPOTENCY_CONFLICT`.
-- [ ] A simulated lost response can be retried safely.
-- [ ] Failed and stale request policies have named automated tests.
-- [ ] All Weeks 1–4 invariants pass in CI.
+- [x] Fifty concurrent identical requests create one ledger transaction.
+- [x] All successful duplicate requests return the same transfer ID and response.
+- [x] Same key with different content returns `IDEMPOTENCY_CONFLICT`.
+- [x] A simulated lost response can be retried safely.
+- [x] Failed and stale request policies have named automated tests.
+- [x] All Weeks 1–4 invariants pass in CI.
 
 ### Week 4 hard gate
 
@@ -519,7 +519,7 @@ Update this table at the end of every implementation session.
 | 1 — Foundation              | Complete    |       100% | Passed      | 15 automated tests and local API smoke test passed          |
 | 2 — Journal                 | Complete    |       100% | Passed      | Immutable balanced journal and funding gate passed          |
 | 3 — Transfers               | Complete    |       100% | Passed      | Concurrency, reference-model, and architecture gates passed |
-| 4 — Idempotency             | Not started |         0% | Pending     |                                                             |
+| 4 — Idempotency             | Complete    |       100% | Passed      | 66 tests, idempotency replay/conflict/concurrency gates passed |
 | 5 — Outbox                  | Not started |         0% | Pending     |                                                             |
 | 6 — Consumer/reconciliation | Not started |         0% | Pending     |                                                             |
 | 7 — Quality/benchmark       | Not started |         0% | Pending     |                                                             |
