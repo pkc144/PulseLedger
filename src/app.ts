@@ -14,6 +14,7 @@ import { PostgresTransferStore } from './modules/transfers/transfer-repository.j
 import { transferRoutes } from './modules/transfers/transfer-routes.js';
 import { TransferMetrics, TransferService } from './modules/transfers/transfer-service.js';
 import type { TransactionalDatabase } from './ports/database.js';
+import type { OutboxStore } from './modules/outbox/outbox-domain.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -24,6 +25,7 @@ declare module 'fastify' {
 export interface BuildAppOptions {
   database: TransactionalDatabase;
   logger?: boolean | { level: string };
+  outboxStore?: OutboxStore;
 }
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
@@ -59,13 +61,16 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
   await app.register(transferRoutes, {
     idempotency: new IdempotencyService(idempotencyStore),
-    service: new TransferService(new PostgresTransferStore(options.database), {
-      metrics: transferMetrics,
-      telemetry: {
-        completed: (event) => app.log.info(event, 'transfer completed'),
-        retrying: (event) => app.log.warn(event, 'retrying transfer transaction'),
+    service: new TransferService(
+      new PostgresTransferStore(options.database, options.outboxStore),
+      {
+        metrics: transferMetrics,
+        telemetry: {
+          completed: (event) => app.log.info(event, 'transfer completed'),
+          retrying: (event) => app.log.warn(event, 'retrying transfer transaction'),
+        },
       },
-    }),
+    ),
   });
   await app.ready();
   return app;

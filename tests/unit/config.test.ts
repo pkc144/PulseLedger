@@ -8,6 +8,7 @@ describe('loadConfig', () => {
       host: '0.0.0.0',
       logLevel: 'info',
       nodeEnv: 'development',
+      outbox: { batchSize: 10, maxAttempts: 12, pollIntervalMs: 1000 },
       port: 3000,
     });
   });

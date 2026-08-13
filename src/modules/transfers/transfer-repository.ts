@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Database, DatabaseConnection, TransactionalDatabase } from '../../ports/database.js';
+import type { OutboxStore } from '../outbox/outbox-domain.js';
 import type {
   LockedTransferAccount,
   Transfer,
@@ -40,7 +41,10 @@ function toTransfer(row: TransferRow): Transfer {
 }
 
 class PostgresTransferTransaction implements TransferTransaction {
-  public constructor(private readonly database: Database) {}
+  public constructor(
+    private readonly database: Database,
+    private readonly outboxStore?: OutboxStore,
+  ) {}
 
   public async lockAccounts(
     accountIds: readonly [string, string],
@@ -110,6 +114,15 @@ class PostgresTransferTransaction implements TransferTransaction {
       status: 'completed',
     };
 
+    if (this.outboxStore) {
+      await this.outboxStore.insert(this.database, {
+        aggregateId: input.id,
+        aggregateType: 'transfer',
+        eventType: 'transfer.created',
+        payload: transfer,
+      });
+    }
+
     if (input.idempotency) {
       await this.database.query(
         `UPDATE idempotency_records
@@ -127,7 +140,10 @@ class PostgresTransferTransaction implements TransferTransaction {
 }
 
 export class PostgresTransferStore implements TransferStore {
-  public constructor(private readonly database: TransactionalDatabase) {}
+  public constructor(
+    private readonly database: TransactionalDatabase,
+    private readonly outboxStore?: OutboxStore,
+  ) {}
 
   public async findById(id: string): Promise<Transfer | null> {
     const result = await this.database.query<TransferRow>(
@@ -149,7 +165,7 @@ export class PostgresTransferStore implements TransferStore {
     const connection: DatabaseConnection = await this.database.connect();
     try {
       await connection.query('BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE');
-      const result = await work(new PostgresTransferTransaction(connection));
+      const result = await work(new PostgresTransferTransaction(connection, this.outboxStore));
       await connection.query('COMMIT');
       return result;
     } catch (error) {

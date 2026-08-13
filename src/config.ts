@@ -1,10 +1,17 @@
 export type NodeEnvironment = 'development' | 'test' | 'production';
 
+export interface OutboxConfig {
+  batchSize: number;
+  maxAttempts: number;
+  pollIntervalMs: number;
+}
+
 export interface AppConfig {
   databaseUrl: string;
   host: string;
   logLevel: string;
   nodeEnv: NodeEnvironment;
+  outbox: OutboxConfig;
   port: number;
 }
 
@@ -35,11 +42,29 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     throw new Error('LOG_LEVEL is invalid');
   }
 
+  const outboxBatchSize = readPositiveInt(environment.OUTBOX_BATCH_SIZE, 10);
+  const outboxMaxAttempts = readPositiveInt(environment.OUTBOX_MAX_ATTEMPTS, 12);
+  const outboxPollIntervalMs = readPositiveInt(environment.OUTBOX_POLL_INTERVAL_MS, 1_000);
+
   return {
     databaseUrl,
     host: environment.HOST ?? '0.0.0.0',
     logLevel,
     nodeEnv: nodeEnv as NodeEnvironment,
+    outbox: {
+      batchSize: outboxBatchSize,
+      maxAttempts: outboxMaxAttempts,
+      pollIntervalMs: outboxPollIntervalMs,
+    },
     port: readPort(environment.PORT),
   };
+}
+
+function readPositiveInt(raw: string | undefined, fallback: number): number {
+  if (raw === undefined) return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error('outbox configuration must be a positive integer');
+  }
+  return value;
 }
