@@ -1,9 +1,11 @@
 import type { DatabaseConnection, TransactionalDatabase } from '../../ports/database.js';
-import type {
-  NewOutboxEvent,
-  OutboxRecord,
-  OutboxStore,
-  Queryable,
+import {
+  outboxCurrentEventVersion,
+  outboxDefaultClaimLeaseSeconds,
+  type NewOutboxEvent,
+  type OutboxRecord,
+  type OutboxStore,
+  type Queryable,
 } from './outbox-domain.js';
 
 interface OutboxRow extends Record<string, unknown> {
@@ -12,6 +14,7 @@ interface OutboxRow extends Record<string, unknown> {
   attempts: number;
   created_at: Date;
   event_type: string;
+  event_version: number;
   id: string;
   last_error: string | null;
   next_attempt_at: Date | null;
@@ -27,6 +30,7 @@ function toOutboxRecord(row: OutboxRow): OutboxRecord {
     attempts: row.attempts,
     createdAt: row.created_at.toISOString(),
     eventType: row.event_type,
+    eventVersion: row.event_version,
     id: row.id,
     lastError: row.last_error,
     nextAttemptAt: row.next_attempt_at?.toISOString() ?? null,
@@ -36,14 +40,31 @@ function toOutboxRecord(row: OutboxRow): OutboxRecord {
   };
 }
 
+export interface PostgresOutboxStoreOptions {
+  claimLeaseSeconds?: number;
+}
+
 export class PostgresOutboxStore implements OutboxStore {
-  public constructor(private readonly database: TransactionalDatabase) {}
+  private readonly claimLeaseSeconds: number;
+
+  public constructor(
+    private readonly database: TransactionalDatabase,
+    options: PostgresOutboxStoreOptions = {},
+  ) {
+    this.claimLeaseSeconds = options.claimLeaseSeconds ?? outboxDefaultClaimLeaseSeconds;
+  }
 
   public async insert(db: Queryable, event: NewOutboxEvent): Promise<void> {
     await db.query(
-      `INSERT INTO outbox_events (aggregate_id, aggregate_type, event_type, payload)
-       VALUES ($1, $2, $3, $4)`,
-      [event.aggregateId, event.aggregateType, event.eventType, JSON.stringify(event.payload)],
+      `INSERT INTO outbox_events (aggregate_id, aggregate_type, event_type, event_version, payload)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [
+        event.aggregateId,
+        event.aggregateType,
+        event.eventType,
+        event.eventVersion ?? outboxCurrentEventVersion,
+        JSON.stringify(event.payload),
+      ],
     );
   }
 
@@ -55,18 +76,20 @@ export class PostgresOutboxStore implements OutboxStore {
         `WITH claimed AS (
            SELECT id
            FROM outbox_events
-           WHERE status IN ('pending', 'failed')
+           WHERE status IN ('pending', 'failed', 'processing')
              AND (next_attempt_at IS NULL OR next_attempt_at <= now())
            ORDER BY created_at
            LIMIT $1
            FOR UPDATE SKIP LOCKED
          )
          UPDATE outbox_events
-         SET status = 'processing', attempts = attempts + 1
+         SET status = 'processing',
+             attempts = attempts + 1,
+             next_attempt_at = now() + make_interval(secs => $2)
          WHERE id IN (SELECT id FROM claimed)
-         RETURNING id, aggregate_id, aggregate_type, event_type, payload,
+         RETURNING id, aggregate_id, aggregate_type, event_type, event_version, payload,
                    status, attempts, last_error, next_attempt_at, processed_at, created_at`,
-        [batchSize],
+        [batchSize, this.claimLeaseSeconds],
       );
       await connection.query('COMMIT');
       return result.rows.map(toOutboxRecord);

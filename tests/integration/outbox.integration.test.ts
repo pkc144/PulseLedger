@@ -92,7 +92,7 @@ describe('outbox integration', () => {
       const transfer = response.json<{ id: string }>();
 
       const result = await pool.query(
-        `SELECT id, aggregate_id, aggregate_type, event_type, payload, status
+        `SELECT id, aggregate_id, aggregate_type, event_type, event_version, payload, status
          FROM outbox_events
          WHERE aggregate_id = $1`,
         [transfer.id],
@@ -102,6 +102,7 @@ describe('outbox integration', () => {
       const row = result.rows[0] as Record<string, unknown>;
       expect(row.aggregate_type).toBe('transfer');
       expect(row.event_type).toBe('transfer.created');
+      expect(row.event_version).toBe(1);
       expect(row.status).toBe('pending');
     });
 
@@ -189,6 +190,57 @@ describe('outbox integration', () => {
 
       const claimed = await outboxStore.claimBatch(10);
       expect(claimed).toHaveLength(0);
+    });
+
+    it('reclaims a stale processing event whose lease has elapsed', async () => {
+      // Simulates a worker that claimed the event then crashed before finishing:
+      // the row is left 'processing' with a lease in the past.
+      await pool.query(
+        `INSERT INTO outbox_events (aggregate_id, aggregate_type, event_type, payload, status, attempts, next_attempt_at)
+         VALUES ($1, 'transfer', 'transfer.created', '{}', 'processing', 1, $2)`,
+        [randomUUID(), new Date(Date.now() - 1000).toISOString()],
+      );
+
+      const claimed = await outboxStore.claimBatch(10);
+      expect(claimed).toHaveLength(1);
+      expect(claimed[0]!.status).toBe('processing');
+      expect(claimed[0]!.attempts).toBe(2);
+    });
+
+    it('does not reclaim a processing event whose lease is still active', async () => {
+      await pool.query(
+        `INSERT INTO outbox_events (aggregate_id, aggregate_type, event_type, payload, status, attempts, next_attempt_at)
+         VALUES ($1, 'transfer', 'transfer.created', '{}', 'processing', 1, $2)`,
+        [randomUUID(), new Date(Date.now() + 60_000).toISOString()],
+      );
+
+      const claimed = await outboxStore.claimBatch(10);
+      expect(claimed).toHaveLength(0);
+    });
+
+    it('never lets two workers double-claim the same event', async () => {
+      const ids: string[] = [];
+      for (let i = 0; i < 20; i += 1) {
+        const inserted = await pool.query<{ id: string }>(
+          `INSERT INTO outbox_events (aggregate_id, aggregate_type, event_type, payload)
+           VALUES ($1, 'transfer', 'transfer.created', '{}')
+           RETURNING id`,
+          [randomUUID()],
+        );
+        ids.push(inserted.rows[0]!.id);
+      }
+
+      const workerA = new PostgresOutboxStore(pool);
+      const workerB = new PostgresOutboxStore(pool);
+      const [batchA, batchB] = await Promise.all([
+        workerA.claimBatch(20),
+        workerB.claimBatch(20),
+      ]);
+
+      const claimedIds = [...batchA, ...batchB].map((event) => event.id);
+      expect(claimedIds).toHaveLength(20);
+      expect(new Set(claimedIds).size).toBe(20);
+      expect([...claimedIds].sort()).toEqual([...ids].sort());
     });
   });
 
@@ -365,6 +417,94 @@ describe('outbox integration', () => {
       expect(stats.pending).toBe(1);
       expect(stats.failed).toBe(1);
       expect(stats.processing).toBe(0);
+    });
+  });
+
+  describe('recovery', () => {
+    it('delivers a committed event after a worker restart (stop before processing)', async () => {
+      await pool.query(
+        `INSERT INTO outbox_events (aggregate_id, aggregate_type, event_type, payload)
+         VALUES ($1, 'transfer', 'transfer.created', '{}')`,
+        [randomUUID()],
+      );
+
+      // First worker is interrupted before it ever claims the event: its poll is
+      // scheduled far in the future and it is stopped before the timer fires.
+      const interrupted = new OutboxWorker(outboxStore, { pollIntervalMs: 60_000 });
+      interrupted.start();
+      await interrupted.stop();
+
+      const beforeRestart = await outboxStore.stats();
+      expect(beforeRestart.pending).toBe(1);
+
+      // A fresh worker started after the restart still delivers the durable event.
+      const processed: OutboxRecord[] = [];
+      const restarted = new OutboxWorker(outboxStore, {
+        pollIntervalMs: 50,
+        handler: async (event) => {
+          processed.push(event);
+        },
+      });
+      restarted.start();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await restarted.stop();
+
+      expect(processed.length).toBeGreaterThanOrEqual(1);
+      const result = await pool.query<{ status: string }>(
+        'SELECT status FROM outbox_events LIMIT 1',
+      );
+      expect(result.rows[0]!.status).toBe('processed');
+    });
+
+    it('does not redeliver an event after restart once committed processed (stop after commit)', async () => {
+      await pool.query(
+        `INSERT INTO outbox_events (aggregate_id, aggregate_type, event_type, payload)
+         VALUES ($1, 'transfer', 'transfer.created', '{}')`,
+        [randomUUID()],
+      );
+
+      let deliveries = 0;
+      const handler = async (): Promise<void> => {
+        deliveries += 1;
+      };
+
+      const first = new OutboxWorker(outboxStore, { pollIntervalMs: 50, handler });
+      first.start();
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      await first.stop();
+      expect(deliveries).toBe(1);
+
+      // Restart: the already-processed event must not be delivered a second time.
+      const second = new OutboxWorker(outboxStore, { pollIntervalMs: 50, handler });
+      second.start();
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      await second.stop();
+
+      expect(deliveries).toBe(1);
+    });
+  });
+
+  describe('health readiness', () => {
+    it('reports outbox stats on /health/ready', async () => {
+      await pool.query(
+        `INSERT INTO outbox_events (aggregate_id, aggregate_type, event_type, payload)
+         VALUES ($1, 'transfer', 'transfer.created', '{}')`,
+        [randomUUID()],
+      );
+      await pool.query(
+        `INSERT INTO outbox_events (aggregate_id, aggregate_type, event_type, payload, status, attempts)
+         VALUES ($1, 'transfer', 'transfer.created', '{}', 'failed', 2)`,
+        [randomUUID()],
+      );
+
+      const response = await app.inject({ method: 'GET', url: '/health/ready' });
+      expect(response.statusCode).toBe(200);
+      const body = response.json<{
+        outbox: { failed: number; pending: number; processing: number };
+        status: string;
+      }>();
+      expect(body.status).toBe('ready');
+      expect(body.outbox).toEqual({ pending: 1, processing: 0, failed: 1 });
     });
   });
 });

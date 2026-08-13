@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Database, DatabaseConnection, TransactionalDatabase } from '../../ports/database.js';
-import type { OutboxStore } from '../outbox/outbox-domain.js';
+import { outboxCurrentEventVersion, type OutboxStore } from '../outbox/outbox-domain.js';
 import type {
   LockedTransferAccount,
   Transfer,
@@ -119,6 +119,7 @@ class PostgresTransferTransaction implements TransferTransaction {
         aggregateId: input.id,
         aggregateType: 'transfer',
         eventType: 'transfer.created',
+        eventVersion: outboxCurrentEventVersion,
         payload: transfer,
       });
     }

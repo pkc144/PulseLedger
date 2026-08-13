@@ -8,6 +8,7 @@ export interface NewOutboxEvent {
   aggregateId: string;
   aggregateType: OutboxAggregateType;
   eventType: string;
+  eventVersion?: number;
   payload: unknown;
 }
 
@@ -17,6 +18,7 @@ export interface OutboxRecord {
   attempts: number;
   createdAt: string;
   eventType: string;
+  eventVersion: number;
   id: string;
   lastError: string | null;
   nextAttemptAt: string | null;
@@ -52,6 +54,17 @@ export interface OutboxWorkerConfig {
 export const outboxDefaultBatchSize = 10;
 export const outboxDefaultPollIntervalMs = 1_000;
 export const outboxDefaultMaxAttempts = 12;
+
+/** Current schema version stamped on newly written outbox event envelopes. */
+export const outboxCurrentEventVersion = 1;
+
+/**
+ * How long a claimed ('processing') event is leased to a worker before it is
+ * considered abandoned and eligible for reclaim. A worker that crashes between
+ * claim and completion leaves the row 'processing'; once the lease elapses,
+ * another worker reclaims it so the event is still delivered at least once.
+ */
+export const outboxDefaultClaimLeaseSeconds = 300;
 
 export function computeNextAttempt(attempts: number, failedAt: Date): Date {
   const baseMs = 100;

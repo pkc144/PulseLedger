@@ -51,8 +51,12 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
 
   const idempotencyStore = new PostgresIdempotencyStore(options.database);
+  const outboxStore = options.outboxStore;
 
-  await app.register(healthRoutes, { database: options.database });
+  await app.register(healthRoutes, {
+    database: options.database,
+    ...(outboxStore ? { outboxStats: () => outboxStore.stats() } : {}),
+  });
   await app.register(accountRoutes, {
     service: new AccountService(new PostgresAccountStore(options.database)),
   });
@@ -62,7 +66,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(transferRoutes, {
     idempotency: new IdempotencyService(idempotencyStore),
     service: new TransferService(
-      new PostgresTransferStore(options.database, options.outboxStore),
+      new PostgresTransferStore(options.database, outboxStore),
       {
         metrics: transferMetrics,
         telemetry: {

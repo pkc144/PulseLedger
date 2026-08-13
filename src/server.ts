@@ -6,7 +6,9 @@ import { OutboxWorker } from './modules/outbox/outbox-worker.js';
 
 const config = loadConfig();
 const pool = createPool(config.databaseUrl);
-const outboxStore = new PostgresOutboxStore(pool);
+const outboxStore = new PostgresOutboxStore(pool, {
+  claimLeaseSeconds: config.outbox.claimLeaseSeconds,
+});
 const app = await buildApp({ database: pool, logger: { level: config.logLevel }, outboxStore });
 
 const worker = new OutboxWorker(outboxStore, {

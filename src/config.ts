@@ -2,6 +2,7 @@ export type NodeEnvironment = 'development' | 'test' | 'production';
 
 export interface OutboxConfig {
   batchSize: number;
+  claimLeaseSeconds: number;
   maxAttempts: number;
   pollIntervalMs: number;
 }
@@ -43,6 +44,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
   }
 
   const outboxBatchSize = readPositiveInt(environment.OUTBOX_BATCH_SIZE, 10);
+  const outboxClaimLeaseSeconds = readPositiveInt(environment.OUTBOX_CLAIM_LEASE_SECONDS, 300);
   const outboxMaxAttempts = readPositiveInt(environment.OUTBOX_MAX_ATTEMPTS, 12);
   const outboxPollIntervalMs = readPositiveInt(environment.OUTBOX_POLL_INTERVAL_MS, 1_000);
 
@@ -53,6 +55,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     nodeEnv: nodeEnv as NodeEnvironment,
     outbox: {
       batchSize: outboxBatchSize,
+      claimLeaseSeconds: outboxClaimLeaseSeconds,
       maxAttempts: outboxMaxAttempts,
       pollIntervalMs: outboxPollIntervalMs,
     },

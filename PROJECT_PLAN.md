@@ -330,27 +330,27 @@ Preserve downstream event intent without a database/message-broker dual-write fa
 
 ### Tasks
 
-- [ ] Add the outbox event migration.
-- [ ] Write a transfer-created event in the same transaction as the transfer.
-- [ ] Define an event envelope and schema version.
-- [ ] Implement bounded batch claiming with `FOR UPDATE SKIP LOCKED`.
-- [ ] Support multiple worker instances without duplicate claiming.
-- [ ] Mark processing success with timestamps.
-- [ ] Record attempts, next-attempt time, and last failure.
-- [ ] Add bounded backoff and a maximum attempt policy.
-- [ ] Implement graceful worker shutdown.
-- [ ] Make worker polling and batch size configurable.
-- [ ] Add failure visibility through structured logs and health status.
-- [ ] Add stop-before-processing and stop-after-commit recovery tests.
-- [ ] Write ADR-003: transactional outbox instead of dual writes.
+- [x] Add the outbox event migration.
+- [x] Write a transfer-created event in the same transaction as the transfer.
+- [x] Define an event envelope and schema version.
+- [x] Implement bounded batch claiming with `FOR UPDATE SKIP LOCKED`.
+- [x] Support multiple worker instances without duplicate claiming.
+- [x] Mark processing success with timestamps.
+- [x] Record attempts, next-attempt time, and last failure.
+- [x] Add bounded backoff and a maximum attempt policy.
+- [x] Implement graceful worker shutdown.
+- [x] Make worker polling and batch size configurable.
+- [x] Add failure visibility through structured logs and health status.
+- [x] Add stop-before-processing and stop-after-commit recovery tests.
+- [x] Write ADR-003: transactional outbox instead of dual writes.
 
 ### Verification
 
-- [ ] Every committed transfer has a committed outbox event.
-- [ ] A rolled-back transfer has no outbox event.
-- [ ] A committed event survives worker interruption and restart.
-- [ ] Two workers cannot claim the same available row simultaneously.
-- [ ] Failed attempts are visible and retry according to a bounded policy.
+- [x] Every committed transfer has a committed outbox event.
+- [x] A rolled-back transfer has no outbox event.
+- [x] A committed event survives worker interruption and restart.
+- [x] Two workers cannot claim the same available row simultaneously.
+- [x] Failed attempts are visible and retry according to a bounded policy.
 
 ### Week 5 deliverable
 
@@ -520,7 +520,7 @@ Update this table at the end of every implementation session.
 | 2 — Journal                 | Complete    |       100% | Passed      | Immutable balanced journal and funding gate passed          |
 | 3 — Transfers               | Complete    |       100% | Passed      | Concurrency, reference-model, and architecture gates passed |
 | 4 — Idempotency             | Complete    |       100% | Passed      | 66 tests, idempotency replay/conflict/concurrency gates passed |
-| 5 — Outbox                  | Not started |         0% | Pending     |                                                             |
+| 5 — Outbox                  | Complete    |       100% | Passed      | Transactional outbox + worker; atomic event, SKIP LOCKED claim, crash-lease recovery, health stats; ADR-003 |
 | 6 — Consumer/reconciliation | Not started |         0% | Pending     |                                                             |
 | 7 — Quality/benchmark       | Not started |         0% | Pending     |                                                             |
 | 8 — Release                 | Not started |         0% | Pending     |                                                             |

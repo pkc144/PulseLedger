@@ -4,7 +4,7 @@
 
 PulseLedger is a correctness-first payment ledger implemented as a **modular monolith** backed by one PostgreSQL database. This document is the implementation contract for new project work. [PROJECT_PLAN.md](../PROJECT_PLAN.md) defines delivery order and scope; this document defines boundaries and dependency direction.
 
-The repository currently implements the foundation, account API, immutable double-entry journal, treasury funding, serializable customer transfers, and request idempotency with stable response replay. Outbox processing, reconciliation, and benchmarks remain planned work and must be added incrementally through the boundaries below.
+The repository currently implements the foundation, account API, immutable double-entry journal, treasury funding, serializable customer transfers, request idempotency with stable response replay, and a transactional outbox drained by a background worker. Consumer inbox/reconciliation and benchmarks remain planned work and must be added incrementally through the boundaries below.
 
 ## Current system context
 
@@ -20,12 +20,17 @@ Fastify application (single deployable process)
 PostgreSQL (single source of durable state)
     |- accounts and cached balances
     |- immutable ledger transactions and journal entries
-    `- completed transfer projections
+    |- completed transfer projections
+    |- idempotency records and stable responses
+    `- transactional outbox events
+                  |
+                  v
+             Outbox worker (background process, drains committed events)
 ```
 
 PostgreSQL constraints and transactions enforce financial invariants. The immutable journal will be the source of truth; `accounts.balance_minor` is only a transactional cache. No Redis, message broker, microservice split, or direct balance-editing path belongs in v1.
 
-The planned Week 5–6 extension keeps the same process and database boundary:
+The outbox worker (Week 5) and the planned Week 6 consumer keep the same process and database boundary:
 
 ```text
 committed PostgreSQL outbox -> repository worker entrypoint -> consumer inbox + audit effect
@@ -132,13 +137,15 @@ An idempotent transfer request extends the transaction boundary to claim or repl
 
 No route may split monetary steps across independent transactions. The application use case owns the transaction lifecycle through an injected store; persistence executes SQL using one transaction-scoped database connection.
 
-### Future outbox processing
+### Current outbox processing
 
-The API transaction writes an outbox record but performs no external side effect. A separately started worker claims committed records, records a unique consumer-inbox key, applies the audit effect, and marks completion. A crash or retry may repeat delivery, but the inbox makes the logical effect occur at most once.
+The transfer transaction writes a `transfer.created` outbox record inside the same `SERIALIZABLE` transaction that posts the transfer, so the event and the ledger commit atomically — no dual write. The request path performs no external side effect.
+
+A separately started `OutboxWorker` drains the table independently. It claims a bounded batch with `FOR UPDATE SKIP LOCKED` (so multiple worker instances never claim the same row), runs the handler, then marks each event `processed` or `failed` with bounded exponential backoff and a maximum attempt cap. Each claim leases the row for a configurable interval by pushing `next_attempt_at` forward; a worker that crashes between claim and completion leaves the row `processing`, and once the lease elapses another worker reclaims it. Delivery is therefore at least once, poll/batch/attempt/lease are configurable via `OUTBOX_*`, and `/health/ready` reports pending/processing/failed counts. The planned Week 6 consumer inbox records a unique `(consumer, event_id)` key so the logical effect occurs at most once. See [ADR-003](./adr/003-transactional-outbox.md).
 
 ## Data and correctness rules
 
-These rules outrank convenience and performance. Rules 1–5 are enforced now; rules 6–8 are target invariants delivered in Weeks 4–6.
+These rules outrank convenience and performance. Rules 1–7 are enforced now; rule 8 is the target invariant delivered by the Week 6 consumer inbox.
 
 1. Monetary values are integer minor units in PostgreSQL `bigint`; JSON exposes them as decimal strings.
 2. Every posted ledger transaction has total debits equal to total credits in one currency.
