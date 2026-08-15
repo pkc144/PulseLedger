@@ -7,6 +7,7 @@ export type LedgerErrorCode =
   | 'ACCOUNT_NOT_ACTIVE'
   | 'ACCOUNT_NOT_FOUND'
   | 'INVALID_AMOUNT'
+  | 'INVALID_CURSOR'
   | 'INVALID_POSTING'
   | 'MIXED_CURRENCY_POSTING'
   | 'TREASURY_NOT_FOUND'
@@ -77,6 +78,7 @@ export interface PostedTransaction {
 export interface LedgerStore {
   findAccount(id: string): Promise<LedgerAccount | null>;
   findTreasury(currency: string): Promise<LedgerAccount | null>;
+  listJournalEntries(input: ListJournalEntriesInput): Promise<ListJournalEntriesResult>;
   post(input: PostingInput): Promise<PostedTransaction>;
 }
 
@@ -90,8 +92,71 @@ export interface FundingResult extends PostedTransaction {
   fundedAccountId: string;
 }
 
+export interface JournalEntry {
+  accountId: string;
+  amountMinor: string;
+  createdAt: string;
+  currency: string;
+  direction: LedgerDirection;
+  id: string;
+  transactionId: string;
+}
+
+export interface JournalEntryCursor {
+  createdAt: string;
+  id: string;
+}
+
+export const journalEntriesDefaultLimit = 20;
+export const journalEntriesMaxLimit = 100;
+
+/** Opaque to clients; base64url-encoded so it can travel in a query string unescaped. */
+export function encodeJournalEntryCursor(cursor: JournalEntryCursor): string {
+  return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
+}
+
+export function decodeJournalEntryCursor(raw: string): JournalEntryCursor {
+  try {
+    const parsed: unknown = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+    if (typeof parsed !== 'object' || parsed === null) throw new Error('malformed cursor');
+    const { createdAt, id } = parsed as Record<string, unknown>;
+    if (typeof createdAt !== 'string' || Number.isNaN(Date.parse(createdAt))) {
+      throw new Error('malformed cursor createdAt');
+    }
+    if (
+      typeof id !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+    ) {
+      throw new Error('malformed cursor id');
+    }
+    return { createdAt, id };
+  } catch {
+    throw new LedgerError('INVALID_CURSOR', 'Cursor is malformed');
+  }
+}
+
+export interface ListJournalEntriesInput {
+  accountId: string;
+  cursor?: JournalEntryCursor;
+  limit: number;
+}
+
+export interface ListJournalEntriesResult {
+  entries: readonly JournalEntry[];
+  nextCursor: string | null;
+}
+
+export interface ListJournalEntriesOptions {
+  cursor?: string;
+  limit?: number;
+}
+
 export interface LedgerApplication {
   fundAccount(input: FundAccountInput): Promise<FundingResult>;
+  listJournalEntries(
+    accountId: string,
+    options?: ListJournalEntriesOptions,
+  ): Promise<ListJournalEntriesResult>;
 }
 
 export function validatePosting(input: PostingInput): void {

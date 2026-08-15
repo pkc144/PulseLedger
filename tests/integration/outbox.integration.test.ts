@@ -13,6 +13,8 @@ import {
   type OutboxStore,
 } from '../../src/modules/outbox/outbox-domain.js';
 
+const testAdminApiKey = 'test-admin-api-key-0123456789';
+
 let container: StartedPostgreSqlContainer | undefined;
 let pool: pg.Pool;
 let outboxStore: OutboxStore;
@@ -32,7 +34,7 @@ beforeAll(async () => {
   pool = createPool(databaseUrl);
   await runMigrations(pool);
   outboxStore = new PostgresOutboxStore(pool);
-  app = await buildApp({ database: pool, outboxStore });
+  app = await buildApp({ adminApiKey: testAdminApiKey, database: pool, outboxStore });
 });
 
 afterAll(async () => {
@@ -68,6 +70,7 @@ async function fund(accountId: string, amountMinor: string): Promise<void> {
   const response = await app.inject({
     method: 'POST',
     url: '/v1/admin/fund',
+    headers: { 'x-admin-api-key': testAdminApiKey },
     payload: { accountId, amountMinor },
   });
   expect(response.statusCode).toBe(201);

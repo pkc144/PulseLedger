@@ -18,6 +18,7 @@
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "reconcile": "tsx src/modules/reconciliation/reconcile-cli.ts",
+    "seed": "tsx scripts/seed.ts",
     "start": "node dist/server.js",
     "test": "vitest run",
     "test:integration": "vitest run tests/integration",

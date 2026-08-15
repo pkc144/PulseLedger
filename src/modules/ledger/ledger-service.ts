@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
+  decodeJournalEntryCursor,
+  journalEntriesDefaultLimit,
+  journalEntriesMaxLimit,
   LedgerError,
   Money,
   validatePosting,
@@ -7,9 +10,20 @@ import {
   type FundingResult,
   type LedgerApplication,
   type LedgerStore,
+  type ListJournalEntriesOptions,
+  type ListJournalEntriesResult,
   type PostedTransaction,
   type PostingInput,
 } from './ledger-domain.js';
+
+// The HTTP schema is the primary gate for `limit` (integer, 1..journalEntriesMaxLimit); this is a
+// defense-in-depth clamp for any caller that reaches the service directly.
+function resolveLimit(requested: number | undefined): number {
+  if (requested === undefined || !Number.isInteger(requested) || requested < 1) {
+    return journalEntriesDefaultLimit;
+  }
+  return Math.min(requested, journalEntriesMaxLimit);
+}
 
 export class LedgerPostingService implements LedgerApplication {
   public constructor(private readonly store: LedgerStore) {}
@@ -46,5 +60,22 @@ export class LedgerPostingService implements LedgerApplication {
     });
 
     return { ...posted, amountMinor: amount.toString(), fundedAccountId: account.id };
+  }
+
+  public async listJournalEntries(
+    accountId: string,
+    options: ListJournalEntriesOptions = {},
+  ): Promise<ListJournalEntriesResult> {
+    const account = await this.store.findAccount(accountId);
+    if (!account) {
+      throw new LedgerError('ACCOUNT_NOT_FOUND', 'Account not found');
+    }
+
+    const limit = resolveLimit(options.limit);
+    return await this.store.listJournalEntries({
+      accountId,
+      limit,
+      ...(options.cursor ? { cursor: decodeJournalEntryCursor(options.cursor) } : {}),
+    });
   }
 }

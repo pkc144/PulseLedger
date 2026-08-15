@@ -41,6 +41,8 @@ class StubDatabase implements TransactionalDatabase, DatabaseConnection {
   }
 }
 
+const testAdminApiKey = 'test-admin-api-key-0123456789';
+
 const apps: Awaited<ReturnType<typeof buildApp>>[] = [];
 
 afterEach(async () => {
@@ -49,7 +51,7 @@ afterEach(async () => {
 
 describe('application routes', () => {
   it('reports liveness', async () => {
-    const app = await buildApp({ database: new StubDatabase() });
+    const app = await buildApp({ adminApiKey: testAdminApiKey, database: new StubDatabase() });
     apps.push(app);
 
     const response = await app.inject({ method: 'GET', url: '/health/live' });
@@ -60,7 +62,7 @@ describe('application routes', () => {
   it('reports database readiness failure', async () => {
     const database = new StubDatabase();
     database.shouldFail = true;
-    const app = await buildApp({ database });
+    const app = await buildApp({ adminApiKey: testAdminApiKey, database });
     apps.push(app);
 
     const response = await app.inject({ method: 'GET', url: '/health/ready' });
@@ -69,7 +71,7 @@ describe('application routes', () => {
   });
 
   it('creates a zero-balance account', async () => {
-    const app = await buildApp({ database: new StubDatabase() });
+    const app = await buildApp({ adminApiKey: testAdminApiKey, database: new StubDatabase() });
     apps.push(app);
 
     const response = await app.inject({
@@ -87,7 +89,7 @@ describe('application routes', () => {
   });
 
   it('returns a stable validation error with a request ID', async () => {
-    const app = await buildApp({ database: new StubDatabase() });
+    const app = await buildApp({ adminApiKey: testAdminApiKey, database: new StubDatabase() });
     apps.push(app);
 
     const response = await app.inject({

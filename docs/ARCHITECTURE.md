@@ -4,7 +4,7 @@
 
 PulseLedger is a correctness-first payment ledger implemented as a **modular monolith** backed by one PostgreSQL database. This document is the implementation contract for new project work. [PROJECT_PLAN.md](../PROJECT_PLAN.md) defines delivery order and scope; this document defines boundaries and dependency direction.
 
-The repository currently implements the foundation, account API, immutable double-entry journal, treasury funding, serializable customer transfers, request idempotency with stable response replay, a transactional outbox drained by a background worker, an idempotent audit consumer fed by that worker, and independent balance reconciliation. Hardening, benchmarks, and release polish (Weeks 7–8) remain planned work and must be added incrementally through the boundaries below.
+The repository currently implements the foundation, account API, immutable double-entry journal, treasury funding, serializable customer transfers, request idempotency with stable response replay, a transactional outbox drained by a background worker, an idempotent audit consumer fed by that worker, independent balance reconciliation, cursor-paginated journal entries, API-key-protected administrative routes, log redaction, and bounded request limits, all verified against real `EXPLAIN ANALYZE` output and real k6 load (`benchmarks/k6/RESULTS.md`). Release polish (Week 8) remains planned work and must be added incrementally through the boundaries below.
 
 ## Current system context
 
@@ -96,6 +96,24 @@ request -> account route -> AccountApplication -> AccountService -> AccountStore
 ```
 
 The route owns HTTP status codes and schemas. The repository owns SQL and row mapping. The domain contract keeps those concerns independently testable.
+
+### Current journal entries pagination
+
+`GET /v1/accounts/:id/entries` is registered from `account-routes.ts` (public, customer-facing) but
+reads through an **injected `LedgerApplication`** — the sanctioned cross-feature pattern of
+depending only on another feature's `*-domain.ts` contract. The data itself is ledger-owned
+(`journal_entries`), so the query logic stays in the `ledger` module; the URL shape reflects the
+client's resource hierarchy (an account's entries), which does not have to match module ownership.
+
+Pagination is keyset-based (`WHERE account_id = $1 AND (created_at, id) > (cursor) ORDER BY
+created_at, id LIMIT n`), using the `journal_entries_account_created_idx (account_id, created_at,
+id)` index defined in Week 2 — before pagination existed, but exactly shaped for it. The opaque
+cursor is base64url-encoded JSON; its `createdAt` field is Postgres's own microsecond-precision
+text rendering of `created_at` (`to_char(..., 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`), never a JS `Date`
+round-trip — `Date.toISOString()` only carries millisecond precision, and building a cursor from it
+can silently re-include a boundary row on the next page whenever two entries land in the same
+millisecond. A malformed cursor raises `INVALID_CURSOR` (400); an unknown account raises
+`ACCOUNT_NOT_FOUND` (404, matching the existing account-lookup contract).
 
 ### Current treasury-funding command
 
@@ -197,10 +215,13 @@ journal_entries * -------- 1 ledger_transactions 1 -------- 0..1 transfers
 - Fastify JSON schemas reject malformed transport input.
 - Domain errors contain only a stable machine code and safe message. The HTTP error adapter owns the explicit code-to-status mapping; domain and application code never carry HTTP status codes.
 - Route-local HTTP failures may use `AppError` because the route is already a transport adapter.
-- Every error response includes the request ID; unexpected errors are logged and return `INTERNAL_ERROR` without leaking details.
+- Every error response includes the request ID; unexpected errors are logged and return `INTERNAL_ERROR` without leaking details. Framework-level client errors (oversized body, malformed content-type, header limits) surface their own real `statusCode` as `REQUEST_REJECTED` instead of collapsing into `INTERNAL_ERROR`.
 - Domain/application code must not depend on Fastify reply objects or status codes.
-- Liveness reports process health without querying PostgreSQL. Readiness verifies required dependencies.
-- Secrets, API keys, idempotency payloads, and sensitive request bodies must not be logged.
+- Liveness reports process health without querying PostgreSQL. Readiness verifies required dependencies and reports outbox backlog counts.
+- Secrets, API keys, idempotency payloads, and sensitive request bodies must not be logged. Pino `redact` (`src/infrastructure/http/logging.ts`) is applied whenever logging is enabled, covering `authorization`, `x-admin-api-key`, and `cookie`/`set-cookie` headers regardless of whether Fastify's own request logging currently serializes headers, so a future call that logs them stays safe by construction.
+- `/v1/admin/fund`, `/v1/admin/reconcile`, and `/v1/admin/metrics` require the `x-admin-api-key` header, checked with a constant-time comparison (`src/infrastructure/http/admin-auth.ts`) and wired only at the composition root as a Fastify child-context `preHandler` — the guarded routes themselves stay unaware that authentication exists. No other route is protected.
+- Request size, connection, keep-alive, and total-request timeouts are explicit Fastify constructor options (`bodyLimit`, `connectionTimeout`, `keepAliveTimeout`, `requestTimeout`), configurable via `REQUEST_BODY_LIMIT_BYTES`/`CONNECTION_TIMEOUT_MS`/`KEEP_ALIVE_TIMEOUT_MS`/`REQUEST_TIMEOUT_MS` with bounded defaults rather than Fastify's larger built-in defaults.
+- Shutdown closes the outbox worker, then the Fastify server (which stops accepting new connections and drains in-flight ones; Fastify's default `return503OnClosing` answers any request that still arrives mid-shutdown with 503), then the database pool — verified with a real listening socket in `tests/integration/hardening.integration.test.ts`, not just `app.inject()`.
 
 ## Testing contract
 

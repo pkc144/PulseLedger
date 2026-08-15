@@ -7,6 +7,8 @@ import { runMigrations } from '../../src/infrastructure/database/migrate.js';
 import type { ReconciliationReport } from '../../src/modules/reconciliation/reconciliation-domain.js';
 import { PostgresReconciliationStore } from '../../src/modules/reconciliation/reconciliation-repository.js';
 
+const testAdminApiKey = 'test-admin-api-key-0123456789';
+
 let container: StartedPostgreSqlContainer | undefined;
 let pool: pg.Pool;
 let store: PostgresReconciliationStore;
@@ -26,7 +28,7 @@ beforeAll(async () => {
   pool = createPool(databaseUrl);
   await runMigrations(pool);
   store = new PostgresReconciliationStore(pool);
-  app = await buildApp({ database: pool });
+  app = await buildApp({ adminApiKey: testAdminApiKey, database: pool });
 });
 
 afterAll(async () => {
@@ -58,6 +60,7 @@ async function fund(accountId: string, amountMinor: string): Promise<void> {
   const response = await app.inject({
     method: 'POST',
     url: '/v1/admin/fund',
+    headers: { 'x-admin-api-key': testAdminApiKey },
     payload: { accountId, amountMinor },
   });
   expect(response.statusCode).toBe(201);
@@ -132,7 +135,11 @@ describe('reconciliation', () => {
     const accountId = await createAccount('INR');
     await fund(accountId, '1000');
 
-    const response = await app.inject({ method: 'POST', url: '/v1/admin/reconcile' });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/admin/reconcile',
+      headers: { 'x-admin-api-key': testAdminApiKey },
+    });
 
     expect(response.statusCode).toBe(200);
     const body = response.json<ReconciliationReport>();
@@ -144,11 +151,28 @@ describe('reconciliation', () => {
     await fund(accountId, '1000');
     await pool.query('UPDATE accounts SET balance_minor = 1 WHERE id = $1', [accountId]);
 
-    const response = await app.inject({ method: 'POST', url: '/v1/admin/reconcile' });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/admin/reconcile',
+      headers: { 'x-admin-api-key': testAdminApiKey },
+    });
 
     expect(response.statusCode).toBe(200);
     const body = response.json<ReconciliationReport>();
     expect(body.ok).toBe(false);
     expect(findIssue(body, accountId)).toMatchObject({ type: 'mismatched' });
+  });
+
+  it('rejects POST /v1/admin/reconcile without a valid admin API key', async () => {
+    const missingKey = await app.inject({ method: 'POST', url: '/v1/admin/reconcile' });
+    expect(missingKey.statusCode).toBe(401);
+    expect(missingKey.json()).toMatchObject({ error: { code: 'UNAUTHORIZED' } });
+
+    const wrongKey = await app.inject({
+      method: 'POST',
+      url: '/v1/admin/reconcile',
+      headers: { 'x-admin-api-key': 'not-the-right-key' },
+    });
+    expect(wrongKey.statusCode).toBe(401);
   });
 });

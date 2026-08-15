@@ -1,11 +1,42 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { AppError } from '../../errors.js';
+import {
+  journalEntriesMaxLimit,
+  ledgerDirections,
+  type LedgerApplication,
+} from '../ledger/ledger-domain.js';
 import type { AccountApplication, SupportedCurrency } from './account-domain.js';
 import { supportedCurrencies } from './account-domain.js';
 
 interface AccountRouteOptions {
+  ledger: LedgerApplication;
   service: AccountApplication;
 }
+
+const journalEntriesResponseSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['entries', 'nextCursor'],
+  properties: {
+    entries: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'transactionId', 'direction', 'amountMinor', 'currency', 'createdAt'],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          transactionId: { type: 'string', format: 'uuid' },
+          direction: { type: 'string', enum: ledgerDirections },
+          amountMinor: { type: 'string', pattern: '^[1-9][0-9]*$' },
+          currency: { type: 'string', pattern: '^[A-Z]{3}$' },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+      },
+    },
+    nextCursor: { type: ['string', 'null'] },
+  },
+} as const;
 
 const accountResponseSchema = {
   type: 'object',
@@ -57,6 +88,35 @@ export const accountRoutes: FastifyPluginAsync<AccountRouteOptions> = async (app
       const account = await options.service.findById(request.params.id);
       if (!account) throw new AppError('ACCOUNT_NOT_FOUND', 404, 'Account not found');
       return account;
+    },
+  );
+
+  app.get<{ Params: { id: string }; Querystring: { cursor?: string; limit?: number } }>(
+    '/v1/accounts/:id/entries',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['id'],
+          properties: { id: { type: 'string', format: 'uuid' } },
+        },
+        querystring: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            cursor: { type: 'string', minLength: 1 },
+            limit: { type: 'integer', minimum: 1, maximum: journalEntriesMaxLimit },
+          },
+        },
+        response: { 200: journalEntriesResponseSchema },
+      },
+    },
+    async (request) => {
+      return await options.ledger.listJournalEntries(request.params.id, {
+        ...(request.query.cursor !== undefined ? { cursor: request.query.cursor } : {}),
+        ...(request.query.limit !== undefined ? { limit: request.query.limit } : {}),
+      });
     },
   );
 };

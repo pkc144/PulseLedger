@@ -1,0 +1,210 @@
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+
+     execution: local
+        script: benchmarks/k6/broad-concurrency.js
+        output: -
+
+     scenarios: (100.00%) 1 scenario, 75 max VUs, 1m20s max duration (incl. graceful stop):
+              * broad_concurrency: Up to 75 looping VUs for 50s over 4 stages (gracefulRampDown: 30s, gracefulStop: 30s)
+
+
+Run                 [ 100% ] setup()
+broad_concurrency   [   0% ]
+
+running (0m02.0s), 01/75 VUs, 0 complete and 0 interrupted iterations
+broad_concurrency   [   1% ] 01/75 VUs  00.3s/50.0s
+
+running (0m03.0s), 04/75 VUs, 40 complete and 0 interrupted iterations
+broad_concurrency   [   3% ] 04/75 VUs  01.3s/50.0s
+
+running (0m04.0s), 08/75 VUs, 143 complete and 0 interrupted iterations
+broad_concurrency   [   5% ] 08/75 VUs  02.3s/50.0s
+
+running (0m05.0s), 12/75 VUs, 276 complete and 0 interrupted iterations
+broad_concurrency   [   7% ] 12/75 VUs  03.3s/50.0s
+
+running (0m06.0s), 16/75 VUs, 411 complete and 0 interrupted iterations
+broad_concurrency   [   9% ] 16/75 VUs  04.3s/50.0s
+
+running (0m07.0s), 20/75 VUs, 529 complete and 0 interrupted iterations
+broad_concurrency   [  11% ] 20/75 VUs  05.3s/50.0s
+
+running (0m08.0s), 23/75 VUs, 579 complete and 0 interrupted iterations
+broad_concurrency   [  13% ] 23/75 VUs  06.3s/50.0s
+
+running (0m09.0s), 27/75 VUs, 626 complete and 0 interrupted iterations
+broad_concurrency   [  15% ] 27/75 VUs  07.3s/50.0s
+
+running (0m10.0s), 31/75 VUs, 672 complete and 0 interrupted iterations
+broad_concurrency   [  17% ] 31/75 VUs  08.3s/50.0s
+
+running (0m11.0s), 35/75 VUs, 717 complete and 0 interrupted iterations
+broad_concurrency   [  19% ] 35/75 VUs  09.3s/50.0s
+
+running (0m12.0s), 39/75 VUs, 755 complete and 0 interrupted iterations
+broad_concurrency   [  21% ] 39/75 VUs  10.3s/50.0s
+
+running (0m13.0s), 42/75 VUs, 804 complete and 0 interrupted iterations
+broad_concurrency   [  23% ] 42/75 VUs  11.3s/50.0s
+
+running (0m14.0s), 46/75 VUs, 848 complete and 0 interrupted iterations
+broad_concurrency   [  25% ] 46/75 VUs  12.3s/50.0s
+
+running (0m15.0s), 50/75 VUs, 891 complete and 0 interrupted iterations
+broad_concurrency   [  27% ] 50/75 VUs  13.3s/50.0s
+
+running (0m16.0s), 53/75 VUs, 938 complete and 0 interrupted iterations
+broad_concurrency   [  29% ] 53/75 VUs  14.3s/50.0s
+
+running (0m17.0s), 57/75 VUs, 980 complete and 0 interrupted iterations
+broad_concurrency   [  31% ] 57/75 VUs  15.3s/50.0s
+
+running (0m18.0s), 61/75 VUs, 1024 complete and 0 interrupted iterations
+broad_concurrency   [  33% ] 61/75 VUs  16.3s/50.0s
+
+running (0m19.0s), 65/75 VUs, 1069 complete and 0 interrupted iterations
+broad_concurrency   [  35% ] 65/75 VUs  17.3s/50.0s
+
+running (0m20.0s), 68/75 VUs, 1114 complete and 0 interrupted iterations
+broad_concurrency   [  37% ] 68/75 VUs  18.3s/50.0s
+
+running (0m21.0s), 72/75 VUs, 1161 complete and 0 interrupted iterations
+broad_concurrency   [  39% ] 72/75 VUs  19.3s/50.0s
+
+running (0m22.0s), 75/75 VUs, 1211 complete and 0 interrupted iterations
+broad_concurrency   [  41% ] 75/75 VUs  20.3s/50.0s
+
+running (0m23.0s), 75/75 VUs, 1251 complete and 0 interrupted iterations
+broad_concurrency   [  43% ] 75/75 VUs  21.3s/50.0s
+
+running (0m24.0s), 75/75 VUs, 1302 complete and 0 interrupted iterations
+broad_concurrency   [  45% ] 75/75 VUs  22.3s/50.0s
+
+running (0m25.0s), 75/75 VUs, 1345 complete and 0 interrupted iterations
+broad_concurrency   [  47% ] 75/75 VUs  23.3s/50.0s
+
+running (0m26.0s), 75/75 VUs, 1387 complete and 0 interrupted iterations
+broad_concurrency   [  49% ] 75/75 VUs  24.3s/50.0s
+
+running (0m27.0s), 75/75 VUs, 1437 complete and 0 interrupted iterations
+broad_concurrency   [  51% ] 75/75 VUs  25.3s/50.0s
+
+running (0m28.0s), 75/75 VUs, 1475 complete and 0 interrupted iterations
+broad_concurrency   [  53% ] 75/75 VUs  26.3s/50.0s
+
+running (0m29.0s), 75/75 VUs, 1523 complete and 0 interrupted iterations
+broad_concurrency   [  55% ] 75/75 VUs  27.3s/50.0s
+
+running (0m30.0s), 75/75 VUs, 1568 complete and 0 interrupted iterations
+broad_concurrency   [  57% ] 75/75 VUs  28.3s/50.0s
+
+running (0m31.0s), 75/75 VUs, 1615 complete and 0 interrupted iterations
+broad_concurrency   [  59% ] 75/75 VUs  29.3s/50.0s
+
+running (0m32.0s), 75/75 VUs, 1663 complete and 0 interrupted iterations
+broad_concurrency   [  61% ] 75/75 VUs  30.3s/50.0s
+
+running (0m33.0s), 75/75 VUs, 1710 complete and 0 interrupted iterations
+broad_concurrency   [  63% ] 75/75 VUs  31.3s/50.0s
+
+running (0m34.0s), 75/75 VUs, 1750 complete and 0 interrupted iterations
+broad_concurrency   [  65% ] 75/75 VUs  32.3s/50.0s
+
+running (0m35.0s), 75/75 VUs, 1800 complete and 0 interrupted iterations
+broad_concurrency   [  67% ] 75/75 VUs  33.3s/50.0s
+
+running (0m36.0s), 75/75 VUs, 1829 complete and 0 interrupted iterations
+broad_concurrency   [  69% ] 75/75 VUs  34.3s/50.0s
+
+running (0m37.0s), 75/75 VUs, 1859 complete and 0 interrupted iterations
+broad_concurrency   [  71% ] 75/75 VUs  35.3s/50.0s
+
+running (0m38.0s), 75/75 VUs, 1892 complete and 0 interrupted iterations
+broad_concurrency   [  73% ] 75/75 VUs  36.3s/50.0s
+
+running (0m39.0s), 75/75 VUs, 1930 complete and 0 interrupted iterations
+broad_concurrency   [  75% ] 75/75 VUs  37.3s/50.0s
+
+running (0m40.0s), 75/75 VUs, 1969 complete and 0 interrupted iterations
+broad_concurrency   [  77% ] 75/75 VUs  38.3s/50.0s
+
+running (0m41.0s), 75/75 VUs, 2013 complete and 0 interrupted iterations
+broad_concurrency   [  79% ] 75/75 VUs  39.3s/50.0s
+
+running (0m42.0s), 74/75 VUs, 2055 complete and 0 interrupted iterations
+broad_concurrency   [  81% ] 74/75 VUs  40.3s/50.0s
+
+running (0m43.0s), 68/75 VUs, 2092 complete and 0 interrupted iterations
+broad_concurrency   [  83% ] 68/75 VUs  41.3s/50.0s
+
+running (0m44.0s), 63/75 VUs, 2137 complete and 0 interrupted iterations
+broad_concurrency   [  85% ] 63/75 VUs  42.3s/50.0s
+
+running (0m45.0s), 58/75 VUs, 2179 complete and 0 interrupted iterations
+broad_concurrency   [  87% ] 58/75 VUs  43.3s/50.0s
+
+running (0m46.0s), 52/75 VUs, 2217 complete and 0 interrupted iterations
+broad_concurrency   [  89% ] 52/75 VUs  44.3s/50.0s
+
+running (0m47.0s), 44/75 VUs, 2263 complete and 0 interrupted iterations
+broad_concurrency   [  91% ] 44/75 VUs  45.3s/50.0s
+
+running (0m48.0s), 32/75 VUs, 2306 complete and 0 interrupted iterations
+broad_concurrency   [  93% ] 32/75 VUs  46.3s/50.0s
+
+running (0m49.0s), 22/75 VUs, 2350 complete and 0 interrupted iterations
+broad_concurrency   [  95% ] 22/75 VUs  47.3s/50.0s
+
+running (0m50.0s), 15/75 VUs, 2408 complete and 0 interrupted iterations
+broad_concurrency   [  97% ] 15/75 VUs  48.3s/50.0s
+
+running (0m51.0s), 06/75 VUs, 2520 complete and 0 interrupted iterations
+broad_concurrency   [  99% ] 06/75 VUs  49.3s/50.0s
+time="2026-08-16T03:47:54+05:30" level=info msg="[broad-concurrency] completed: 11860 -> 13879 (retries: 32835 -> 45446, exhausted: 809 -> 1343)" source=console
+
+
+  █ THRESHOLDS 
+
+    http_req_failed
+    ✗ 'rate<0.02' rate=16.92%
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 3155    61.03849/s
+    checks_succeeded...: 100.00% 3155 out of 3155
+    checks_failed......: 0.00%   0 out of 3155
+
+    ✓ account created (201)
+    ✓ funded (201)
+    ✓ metrics ok (200)
+    ✓ transfer succeeded or bounded-retry-exhausted
+
+    HTTP
+    http_req_duration..............: avg=805.35ms min=237µs  med=365.37ms max=3.82s p(90)=2.53s p(95)=2.72s
+      { expected_response:true }...: avg=513.04ms min=237µs  med=182.9ms  max=3.38s p(90)=1.55s p(95)=2.03s
+    http_req_failed................: 16.92% 534 out of 3155
+    http_reqs......................: 3155   61.03849/s
+
+    EXECUTION
+    iteration_duration.............: avg=1.04s    min=56.2ms med=718.05ms max=3.87s p(90)=2.62s p(95)=2.81s
+    iterations.....................: 2553   49.391843/s
+    vus............................: 6      min=0           max=75
+    vus_max........................: 75     min=75          max=75
+
+    NETWORK
+    data_received..................: 1.4 MB 27 kB/s
+    data_sent......................: 1.0 MB 20 kB/s
+
+
+
+
+running (0m51.7s), 00/75 VUs, 2553 complete and 0 interrupted iterations
+broad_concurrency ✓ [ 100% ] 00/75 VUs  50s
+time="2026-08-16T03:47:54+05:30" level=error msg="thresholds on metrics 'http_req_failed' have been crossed"

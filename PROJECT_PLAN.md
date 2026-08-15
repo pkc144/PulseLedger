@@ -149,6 +149,7 @@ pulseledger/
 | `GET`  | `/v1/transfers/:id`        | Read a stable transfer result              |
 | `POST` | `/v1/admin/fund`           | Fund a demo account from treasury          |
 | `POST` | `/v1/admin/reconcile`      | Compare cached balances with the journal   |
+| `GET`  | `/v1/admin/metrics`        | Read in-process transfer counters          |
 | `GET`  | `/health/live`             | Process liveness                           |
 | `GET`  | `/health/ready`            | Application and database readiness         |
 
@@ -398,30 +399,30 @@ Harden behavior, test realistic workloads, and produce reproducible performance 
 
 ### Tasks
 
-- [ ] Review all error codes and HTTP status mappings.
-- [ ] Add cursor pagination for account journal entries.
-- [ ] Add API-key protection to administrative endpoints.
-- [ ] Redact credentials and sensitive headers from logs.
-- [ ] Add request size, timeout, and connection limits.
-- [ ] Add graceful API shutdown and connection draining.
-- [ ] Seed realistic account and transfer datasets.
-- [ ] Add required indexes and verify them using `EXPLAIN ANALYZE`.
-- [ ] Create k6 normal-transfer scenario.
-- [ ] Create k6 broad-concurrency scenario.
-- [ ] Create k6 duplicate-storm scenario.
-- [ ] Create k6 hot-account contention scenario.
-- [ ] Record throughput, P50/P95/P99, failures, serialization conflicts, and retry counts.
-- [ ] Record commit SHA, machine details, container limits, dataset, duration, and warm-up.
-- [ ] Keep correctness tests running before and after every benchmark.
+- [x] Review all error codes and HTTP status mappings.
+- [x] Add cursor pagination for account journal entries.
+- [x] Add API-key protection to administrative endpoints.
+- [x] Redact credentials and sensitive headers from logs.
+- [x] Add request size, timeout, and connection limits.
+- [x] Add graceful API shutdown and connection draining.
+- [x] Seed realistic account and transfer datasets.
+- [x] Add required indexes and verify them using `EXPLAIN ANALYZE`.
+- [x] Create k6 normal-transfer scenario.
+- [x] Create k6 broad-concurrency scenario.
+- [x] Create k6 duplicate-storm scenario.
+- [x] Create k6 hot-account contention scenario.
+- [x] Record throughput, P50/P95/P99, failures, serialization conflicts, and retry counts.
+- [x] Record commit SHA, machine details, container limits, dataset, duration, and warm-up.
+- [x] Keep correctness tests running before and after every benchmark.
 
 ### Verification
 
-- [ ] All required test layers pass from a clean checkout.
-- [ ] Logs contain request IDs and do not expose secrets.
-- [ ] Query plans show expected index usage.
-- [ ] Every benchmark can be rerun from committed scripts.
-- [ ] Benchmark results include raw output and exact environment details.
-- [ ] Ledger invariants remain green after load tests.
+- [x] All required test layers pass from a clean checkout.
+- [x] Logs contain request IDs and do not expose secrets.
+- [x] Query plans show expected index usage.
+- [x] Every benchmark can be rerun from committed scripts.
+- [x] Benchmark results include raw output and exact environment details.
+- [x] Ledger invariants remain green after load tests.
 
 ### Week 7 deliverable
 
@@ -514,16 +515,16 @@ A polished, reproducible `v1.0.0` release with implementation, tests, benchmarks
 
 Update this table at the end of every implementation session.
 
-| Week                        | Status      | Completion | Gate result | Notes                                                                                                       |
-| --------------------------- | ----------- | ---------: | ----------- | ----------------------------------------------------------------------------------------------------------- |
-| 1 — Foundation              | Complete    |       100% | Passed      | 15 automated tests and local API smoke test passed                                                          |
-| 2 — Journal                 | Complete    |       100% | Passed      | Immutable balanced journal and funding gate passed                                                          |
-| 3 — Transfers               | Complete    |       100% | Passed      | Concurrency, reference-model, and architecture gates passed                                                 |
-| 4 — Idempotency             | Complete    |       100% | Passed      | 66 tests, idempotency replay/conflict/concurrency gates passed                                              |
-| 5 — Outbox                  | Complete    |       100% | Passed      | Transactional outbox + worker; atomic event, SKIP LOCKED claim, crash-lease recovery, health stats; ADR-003 |
-| 6 — Consumer/reconciliation | Complete    |       100% | Passed      | Idempotent audit consumer (1,000-duplicate test), read-only reconciliation (CLI + admin endpoint), ADR-004  |
-| 7 — Quality/benchmark       | Not started |         0% | Pending     |                                                                                                             |
-| 8 — Release                 | Not started |         0% | Pending     |                                                                                                             |
+| Week                        | Status      | Completion | Gate result | Notes                                                                                                                                                                              |
+| --------------------------- | ----------- | ---------: | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 — Foundation              | Complete    |       100% | Passed      | 15 automated tests and local API smoke test passed                                                                                                                                 |
+| 2 — Journal                 | Complete    |       100% | Passed      | Immutable balanced journal and funding gate passed                                                                                                                                 |
+| 3 — Transfers               | Complete    |       100% | Passed      | Concurrency, reference-model, and architecture gates passed                                                                                                                        |
+| 4 — Idempotency             | Complete    |       100% | Passed      | 66 tests, idempotency replay/conflict/concurrency gates passed                                                                                                                     |
+| 5 — Outbox                  | Complete    |       100% | Passed      | Transactional outbox + worker; atomic event, SKIP LOCKED claim, crash-lease recovery, health stats; ADR-003                                                                        |
+| 6 — Consumer/reconciliation | Complete    |       100% | Passed      | Idempotent audit consumer (1,000-duplicate test), read-only reconciliation (CLI + admin endpoint), ADR-004                                                                         |
+| 7 — Quality/benchmark       | Complete    |       100% | Passed      | Admin API-key auth, pagination, log redaction, request limits; real k6 results (4 scenarios, ~14k transfers, 0 reconciliation issues); index verification via real EXPLAIN ANALYZE |
+| 8 — Release                 | Not started |         0% | Pending     |                                                                                                                                                                                    |
 
 Allowed status values: `Not started`, `In progress`, `Blocked`, and `Complete`.
 

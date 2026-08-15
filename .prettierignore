@@ -1,0 +1,2 @@
+# Raw k6 benchmark output is evidence, not source -- keep it exactly as the tool produced it.
+benchmarks/k6/results/

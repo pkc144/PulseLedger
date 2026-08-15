@@ -6,6 +6,8 @@ import { buildApp } from '../../src/app.js';
 import { createPool } from '../../src/infrastructure/database/pool.js';
 import { runMigrations } from '../../src/infrastructure/database/migrate.js';
 
+const testAdminApiKey = 'test-admin-api-key-0123456789';
+
 let container: StartedPostgreSqlContainer | undefined;
 let pool: pg.Pool;
 let app: Awaited<ReturnType<typeof buildApp>>;
@@ -23,7 +25,7 @@ beforeAll(async () => {
 
   pool = createPool(databaseUrl);
   await runMigrations(pool);
-  app = await buildApp({ database: pool });
+  app = await buildApp({ adminApiKey: testAdminApiKey, database: pool });
 });
 
 afterAll(async () => {
@@ -46,6 +48,7 @@ async function fund(accountId: string, amountMinor: string): Promise<string> {
   const response = await app.inject({
     method: 'POST',
     url: '/v1/admin/fund',
+    headers: { 'x-admin-api-key': testAdminApiKey },
     payload: { accountId, amountMinor },
   });
   expect(response.statusCode).toBe(201);

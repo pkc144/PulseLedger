@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
+import type { RequestLimitsConfig } from './config.js';
 import { errorHandler } from './errors.js';
+import { requireAdminApiKey } from './infrastructure/http/admin-auth.js';
+import { withRedaction } from './infrastructure/http/logging.js';
 import { PostgresIdempotencyStore } from './modules/idempotency/idempotency-repository.js';
 import { IdempotencyService } from './modules/idempotency/idempotency-service.js';
 import { PostgresAccountStore } from './modules/accounts/account-repository.js';
@@ -25,15 +28,55 @@ declare module 'fastify' {
   }
 }
 
+// Applied whenever a caller (tests) doesn't supply explicit limits from config; mirrors
+// config.ts's own defaults so behavior is identical either way.
+const defaultRequestLimits: RequestLimitsConfig = {
+  bodyLimitBytes: 16 * 1024,
+  connectionTimeoutMs: 10_000,
+  keepAliveTimeoutMs: 5_000,
+  requestTimeoutMs: 30_000,
+};
+
+const metricsResponseSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['transfers'],
+  properties: {
+    transfers: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['completed', 'retries', 'exhausted'],
+      properties: {
+        completed: { type: 'integer' },
+        retries: { type: 'integer' },
+        exhausted: { type: 'integer' },
+      },
+    },
+  },
+} as const;
+
 export interface BuildAppOptions {
+  adminApiKey: string;
   database: TransactionalDatabase;
   logger?: boolean | { level: string };
   outboxStore?: OutboxStore;
+  requestLimits?: RequestLimitsConfig;
 }
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
+  const limits = options.requestLimits ?? defaultRequestLimits;
+
   const app = Fastify({
-    logger: options.logger ?? false,
+    bodyLimit: limits.bodyLimitBytes,
+    connectionTimeout: limits.connectionTimeoutMs,
+    keepAliveTimeout: limits.keepAliveTimeoutMs,
+    requestTimeout: limits.requestTimeoutMs,
+    // Matches the pre-existing default: no explicit `logger` option means disabled, exactly as
+    // it did before request-limit/redaction hardening was added.
+    logger:
+      options.logger === undefined || options.logger === false
+        ? false
+        : withRedaction(typeof options.logger === 'object' ? options.logger : {}),
     genReqId: (request) => {
       const suppliedId = request.headers['x-request-id'];
       return typeof suppliedId === 'string' && suppliedId.length <= 128 ? suppliedId : randomUUID();
@@ -55,19 +98,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
   const idempotencyStore = new PostgresIdempotencyStore(options.database);
   const outboxStore = options.outboxStore;
+  const ledgerService = new LedgerPostingService(new PostgresLedgerStore(options.database));
 
   await app.register(healthRoutes, {
     database: options.database,
     ...(outboxStore ? { outboxStats: () => outboxStore.stats() } : {}),
   });
   await app.register(accountRoutes, {
+    ledger: ledgerService,
     service: new AccountService(new PostgresAccountStore(options.database)),
-  });
-  await app.register(ledgerRoutes, {
-    service: new LedgerPostingService(new PostgresLedgerStore(options.database)),
-  });
-  await app.register(reconciliationRoutes, {
-    service: new ReconciliationService(new PostgresReconciliationStore(options.database)),
   });
   await app.register(transferRoutes, {
     idempotency: new IdempotencyService(idempotencyStore),
@@ -79,6 +118,28 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       },
     }),
   });
+
+  // Administrative routes share one API-key guard, applied via an encapsulated child context.
+  // Fastify plugin encapsulation keeps this preHandler from leaking to any route registered
+  // above, so ledgerRoutes/reconciliationRoutes stay unaware that auth exists at all.
+  await app.register(async (adminApp) => {
+    adminApp.addHook('preHandler', requireAdminApiKey(options.adminApiKey));
+
+    await adminApp.register(ledgerRoutes, { service: ledgerService });
+    await adminApp.register(reconciliationRoutes, {
+      service: new ReconciliationService(new PostgresReconciliationStore(options.database)),
+    });
+
+    // Exposes the Week 3 in-process transfer counters (completed/retries/exhausted) for
+    // operational visibility and benchmark reporting. Trivial enough to inline here rather
+    // than a dedicated module for one read of an already-decorated value.
+    adminApp.get(
+      '/v1/admin/metrics',
+      { schema: { response: { 200: metricsResponseSchema } } },
+      async () => ({ transfers: transferMetrics.snapshot() }),
+    );
+  });
+
   await app.ready();
   return app;
 }

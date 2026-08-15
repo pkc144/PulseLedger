@@ -44,7 +44,11 @@ async function runReconcileCli(): Promise<CliResult> {
   try {
     const { stdout } = await execFileAsync('node', ['--import', 'tsx', cliPath], {
       cwd: process.cwd(),
-      env: { ...process.env, DATABASE_URL: databaseUrl },
+      env: {
+        ...process.env,
+        DATABASE_URL: databaseUrl,
+        ADMIN_API_KEY: 'test-admin-api-key-0123456789',
+      },
     });
     return { code: 0, stdout };
   } catch (error) {

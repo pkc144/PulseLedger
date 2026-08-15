@@ -14,6 +14,14 @@ services:
       retries: 15
     volumes:
       - pulseledger-postgres:/var/lib/postgresql/data
+    # Bounded so local benchmark runs are reproducible instead of silently depending on whatever
+    # the host machine happens to have free. Honored by `docker compose up` (Compose v2 applies
+    # deploy.resources.limits outside Swarm too); recorded verbatim in benchmark reports.
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2g
 
 volumes:
   pulseledger-postgres:

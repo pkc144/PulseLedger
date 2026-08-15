@@ -12,7 +12,13 @@ const outboxStore = new PostgresOutboxStore(pool, {
   claimLeaseSeconds: config.outbox.claimLeaseSeconds,
 });
 const auditConsumer = new AuditConsumerService(new PostgresAuditConsumerStore(pool));
-const app = await buildApp({ database: pool, logger: { level: config.logLevel }, outboxStore });
+const app = await buildApp({
+  adminApiKey: config.adminApiKey,
+  database: pool,
+  logger: { level: config.logLevel },
+  outboxStore,
+  requestLimits: config.requestLimits,
+});
 
 const worker = new OutboxWorker(outboxStore, {
   batchSize: config.outbox.batchSize,
