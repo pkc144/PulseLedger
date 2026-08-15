@@ -91,7 +91,10 @@ export class TransferService implements TransferApplication {
     return this.metrics;
   }
 
-  public async create(input: CreateTransferInput, options?: CreateTransferOptions): Promise<Transfer> {
+  public async create(
+    input: CreateTransferInput,
+    options?: CreateTransferOptions,
+  ): Promise<Transfer> {
     const amount = Money.fromMinor(input.amountMinor);
     if (input.sourceAccountId === input.destinationAccountId) {
       throw new TransferError('SELF_TRANSFER', 'Source and destination must differ');

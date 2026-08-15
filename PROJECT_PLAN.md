@@ -364,27 +364,27 @@ Prevent repeated business effects and independently verify cached balances again
 
 ### Tasks
 
-- [ ] Add consumer inbox and audit effect migrations.
-- [ ] Enforce unique `(consumer_name, event_id)` processing.
-- [ ] Implement audit-event consumption in one database transaction.
-- [ ] Make duplicate event delivery a successful no-op.
-- [ ] Add journal-derived balance queries.
-- [ ] Implement reconciliation as a CLI command.
-- [ ] Add the protected reconciliation administrative endpoint.
-- [ ] Report missing, mismatched, and unexpected balance records.
-- [ ] Ensure reconciliation does not silently repair data in v1.
-- [ ] Add seeded-corruption and mismatch tests.
-- [ ] Test 1,000 duplicate deliveries producing one logical audit effect.
-- [ ] Document why delivery is at-least-once while effects are logically once.
-- [ ] Write ADR-004: modular monolith and database worker for v1.
+- [x] Add consumer inbox and audit effect migrations.
+- [x] Enforce unique `(consumer_name, event_id)` processing.
+- [x] Implement audit-event consumption in one database transaction.
+- [x] Make duplicate event delivery a successful no-op.
+- [x] Add journal-derived balance queries.
+- [x] Implement reconciliation as a CLI command.
+- [x] Add the protected reconciliation administrative endpoint.
+- [x] Report missing, mismatched, and unexpected balance records.
+- [x] Ensure reconciliation does not silently repair data in v1.
+- [x] Add seeded-corruption and mismatch tests.
+- [x] Test 1,000 duplicate deliveries producing one logical audit effect.
+- [x] Document why delivery is at-least-once while effects are logically once.
+- [x] Write ADR-004: modular monolith and database worker for v1.
 
 ### Verification
 
-- [ ] Duplicate delivery creates one logical consumer effect.
-- [ ] Inbox and effect commit atomically.
-- [ ] Reconciliation reports a seeded mismatch.
-- [ ] A healthy database produces a clean reconciliation report.
-- [ ] The CLI returns a non-zero exit status when mismatches exist.
+- [x] Duplicate delivery creates one logical consumer effect.
+- [x] Inbox and effect commit atomically.
+- [x] Reconciliation reports a seeded mismatch.
+- [x] A healthy database produces a clean reconciliation report.
+- [x] The CLI returns a non-zero exit status when mismatches exist.
 
 ### Week 6 deliverable
 
@@ -514,16 +514,16 @@ A polished, reproducible `v1.0.0` release with implementation, tests, benchmarks
 
 Update this table at the end of every implementation session.
 
-| Week                        | Status      | Completion | Gate result | Notes                                                       |
-| --------------------------- | ----------- | ---------: | ----------- | ----------------------------------------------------------- |
-| 1 — Foundation              | Complete    |       100% | Passed      | 15 automated tests and local API smoke test passed          |
-| 2 — Journal                 | Complete    |       100% | Passed      | Immutable balanced journal and funding gate passed          |
-| 3 — Transfers               | Complete    |       100% | Passed      | Concurrency, reference-model, and architecture gates passed |
-| 4 — Idempotency             | Complete    |       100% | Passed      | 66 tests, idempotency replay/conflict/concurrency gates passed |
+| Week                        | Status      | Completion | Gate result | Notes                                                                                                       |
+| --------------------------- | ----------- | ---------: | ----------- | ----------------------------------------------------------------------------------------------------------- |
+| 1 — Foundation              | Complete    |       100% | Passed      | 15 automated tests and local API smoke test passed                                                          |
+| 2 — Journal                 | Complete    |       100% | Passed      | Immutable balanced journal and funding gate passed                                                          |
+| 3 — Transfers               | Complete    |       100% | Passed      | Concurrency, reference-model, and architecture gates passed                                                 |
+| 4 — Idempotency             | Complete    |       100% | Passed      | 66 tests, idempotency replay/conflict/concurrency gates passed                                              |
 | 5 — Outbox                  | Complete    |       100% | Passed      | Transactional outbox + worker; atomic event, SKIP LOCKED claim, crash-lease recovery, health stats; ADR-003 |
-| 6 — Consumer/reconciliation | Not started |         0% | Pending     |                                                             |
-| 7 — Quality/benchmark       | Not started |         0% | Pending     |                                                             |
-| 8 — Release                 | Not started |         0% | Pending     |                                                             |
+| 6 — Consumer/reconciliation | Complete    |       100% | Passed      | Idempotent audit consumer (1,000-duplicate test), read-only reconciliation (CLI + admin endpoint), ADR-004  |
+| 7 — Quality/benchmark       | Not started |         0% | Pending     |                                                                                                             |
+| 8 — Release                 | Not started |         0% | Pending     |                                                                                                             |
 
 Allowed status values: `Not started`, `In progress`, `Blocked`, and `Complete`.
 

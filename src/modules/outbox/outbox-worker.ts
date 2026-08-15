@@ -96,7 +96,11 @@ export class OutboxWorker {
         await this.processEvent(event);
       }
       const durationMs = Date.now() - startedAt;
-      this.telemetry.pollCompleted({ batchSize: this.batchSize, claimed: batch.length, durationMs });
+      this.telemetry.pollCompleted({
+        batchSize: this.batchSize,
+        claimed: batch.length,
+        durationMs,
+      });
     } catch (error) {
       this.telemetry.claimError(error);
     } finally {
@@ -114,8 +118,7 @@ export class OutboxWorker {
       await this.store.markProcessed(event.id);
       this.telemetry.eventProcessed({ eventId: event.id });
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'unknown processing error';
+      const message = error instanceof Error ? error.message : 'unknown processing error';
 
       if (event.attempts >= this.maxAttempts) {
         await this.store.markFailed(event.id, message, 'infinity');

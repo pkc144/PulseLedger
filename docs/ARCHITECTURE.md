@@ -4,7 +4,7 @@
 
 PulseLedger is a correctness-first payment ledger implemented as a **modular monolith** backed by one PostgreSQL database. This document is the implementation contract for new project work. [PROJECT_PLAN.md](../PROJECT_PLAN.md) defines delivery order and scope; this document defines boundaries and dependency direction.
 
-The repository currently implements the foundation, account API, immutable double-entry journal, treasury funding, serializable customer transfers, request idempotency with stable response replay, and a transactional outbox drained by a background worker. Consumer inbox/reconciliation and benchmarks remain planned work and must be added incrementally through the boundaries below.
+The repository currently implements the foundation, account API, immutable double-entry journal, treasury funding, serializable customer transfers, request idempotency with stable response replay, a transactional outbox drained by a background worker, an idempotent audit consumer fed by that worker, and independent balance reconciliation. Hardening, benchmarks, and release polish (Weeks 7–8) remain planned work and must be added incrementally through the boundaries below.
 
 ## Current system context
 
@@ -22,15 +22,21 @@ PostgreSQL (single source of durable state)
     |- immutable ledger transactions and journal entries
     |- completed transfer projections
     |- idempotency records and stable responses
-    `- transactional outbox events
+    |- transactional outbox events
+    `- consumer inbox and audit effects
                   |
                   v
-             Outbox worker (background process, drains committed events)
+     Outbox worker (background loop in the same process)
+                  |
+                  v
+     consumer inbox (dedup) -> audit effects (append-only)
+
+Reconciliation independently recomputes balances from the immutable journal.
 ```
 
-PostgreSQL constraints and transactions enforce financial invariants. The immutable journal will be the source of truth; `accounts.balance_minor` is only a transactional cache. No Redis, message broker, microservice split, or direct balance-editing path belongs in v1.
+PostgreSQL constraints and transactions enforce financial invariants. The immutable journal is the source of truth; `accounts.balance_minor` is only a transactional cache, independently checked by reconciliation. No Redis, message broker, microservice split, or direct balance-editing path belongs in v1. See [ADR-004](./adr/004-modular-monolith-database-worker.md) for why the worker stays in-process and database-backed.
 
-The outbox worker (Week 5) and the planned Week 6 consumer keep the same process and database boundary:
+The outbox worker (Week 5) and the audit consumer (Week 6) keep the same process and database boundary:
 
 ```text
 committed PostgreSQL outbox -> repository worker entrypoint -> consumer inbox + audit effect
@@ -141,11 +147,21 @@ No route may split monetary steps across independent transactions. The applicati
 
 The transfer transaction writes a `transfer.created` outbox record inside the same `SERIALIZABLE` transaction that posts the transfer, so the event and the ledger commit atomically — no dual write. The request path performs no external side effect.
 
-A separately started `OutboxWorker` drains the table independently. It claims a bounded batch with `FOR UPDATE SKIP LOCKED` (so multiple worker instances never claim the same row), runs the handler, then marks each event `processed` or `failed` with bounded exponential backoff and a maximum attempt cap. Each claim leases the row for a configurable interval by pushing `next_attempt_at` forward; a worker that crashes between claim and completion leaves the row `processing`, and once the lease elapses another worker reclaims it. Delivery is therefore at least once, poll/batch/attempt/lease are configurable via `OUTBOX_*`, and `/health/ready` reports pending/processing/failed counts. The planned Week 6 consumer inbox records a unique `(consumer, event_id)` key so the logical effect occurs at most once. See [ADR-003](./adr/003-transactional-outbox.md).
+A separately started `OutboxWorker` drains the table independently. It claims a bounded batch with `FOR UPDATE SKIP LOCKED` (so multiple worker instances never claim the same row), runs the handler, then marks each event `processed` or `failed` with bounded exponential backoff and a maximum attempt cap. Each claim leases the row for a configurable interval by pushing `next_attempt_at` forward; a worker that crashes between claim and completion leaves the row `processing`, and once the lease elapses another worker reclaims it. Delivery is therefore **at least once**; poll/batch/attempt/lease are configurable via `OUTBOX_*`, and `/health/ready` reports pending/processing/failed counts. See [ADR-003](./adr/003-transactional-outbox.md).
+
+### Current audit consumption
+
+The worker's handler is `AuditConsumerService`. For each claimed event it attempts to insert `(consumer_name, event_id)` into `consumer_inbox`; a unique-constraint conflict means the event was already processed, and the call returns as a **successful no-op** — no error, no retry. A first-time claim proceeds, inside the _same_ transaction, to record the effect in `audit_effects` (today an audit-log row; a real downstream side effect would replace or extend this handler). Both tables reuse the ledger's append-only trigger, so a recorded effect cannot be altered or removed after the fact.
+
+Because delivery is at-least-once but the claim is a unique-constraint insert, the audit effect is produced **at most once logically per event**, regardless of how many times the outbox redelivers it. See [ADR-004](./adr/004-modular-monolith-database-worker.md) for why this split (transport at-least-once, consumer exactly-once-in-effect) is the design, not a gap.
+
+### Current reconciliation
+
+`ReconciliationService` independently recomputes each account's balance by summing debits minus credits from `journal_entries` and compares it against the cached `accounts.balance_minor`. It is **read-only**: it reports drift, it never repairs it — a human decides whether and how to post a correcting entry. Three outcomes are reported: `mismatched` (both sides exist but disagree), `missing` (a nonzero cached balance with zero journal entries behind it), and `unexpected` (a computed balance for an account id with no `accounts` row — structurally prevented today by the composite currency foreign keys, but checked independently rather than assumed). Available as `POST /v1/admin/reconcile` and as the `npm run reconcile` CLI, which exits non-zero when any issue is found.
 
 ## Data and correctness rules
 
-These rules outrank convenience and performance. Rules 1–7 are enforced now; rule 8 is the target invariant delivered by the Week 6 consumer inbox.
+These rules outrank convenience and performance. All eight rules are enforced now.
 
 1. Monetary values are integer minor units in PostgreSQL `bigint`; JSON exposes them as decimal strings.
 2. Every posted ledger transaction has total debits equal to total credits in one currency.

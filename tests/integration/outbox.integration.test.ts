@@ -42,7 +42,9 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await pool.query('TRUNCATE outbox_events, transfers, journal_entries, ledger_transactions, idempotency_records');
+  await pool.query(
+    'TRUNCATE outbox_events, transfers, journal_entries, ledger_transactions, idempotency_records',
+  );
   await pool.query(
     'UPDATE accounts SET balance_minor = 0, updated_at = now() WHERE NOT is_treasury',
   );
@@ -232,10 +234,7 @@ describe('outbox integration', () => {
 
       const workerA = new PostgresOutboxStore(pool);
       const workerB = new PostgresOutboxStore(pool);
-      const [batchA, batchB] = await Promise.all([
-        workerA.claimBatch(20),
-        workerB.claimBatch(20),
-      ]);
+      const [batchA, batchB] = await Promise.all([workerA.claimBatch(20), workerB.claimBatch(20)]);
 
       const claimedIds = [...batchA, ...batchB].map((event) => event.id);
       expect(claimedIds).toHaveLength(20);
@@ -280,10 +279,11 @@ describe('outbox integration', () => {
       const nextAttempt = new Date(Date.now() + 5_000);
       await outboxStore.markFailed(claimed[0]!.id, 'simulated failure', nextAttempt.toISOString());
 
-      const result = await pool.query<{ last_error: string | null; next_attempt_at: Date | null; status: string }>(
-        'SELECT status, last_error, next_attempt_at FROM outbox_events WHERE id = $1',
-        [eventId],
-      );
+      const result = await pool.query<{
+        last_error: string | null;
+        next_attempt_at: Date | null;
+        status: string;
+      }>('SELECT status, last_error, next_attempt_at FROM outbox_events WHERE id = $1', [eventId]);
       expect(result.rows[0]!.status).toBe('failed');
       expect(result.rows[0]!.last_error).toBe('simulated failure');
       expect(result.rows[0]!.next_attempt_at).not.toBeNull();
@@ -313,7 +313,7 @@ describe('outbox integration', () => {
       expect(processedEvents.length).toBeGreaterThanOrEqual(1);
 
       const result = await pool.query<{ status: string }>(
-        'SELECT status FROM outbox_events WHERE status = \'processed\'',
+        "SELECT status FROM outbox_events WHERE status = 'processed'",
       );
       expect(result.rows.length).toBeGreaterThanOrEqual(1);
     });
@@ -341,9 +341,11 @@ describe('outbox integration', () => {
 
       expect(callCount).toBeGreaterThanOrEqual(2);
 
-      const result = await pool.query<{ attempts: number; last_error: string | null; status: string }>(
-        'SELECT status, attempts, last_error FROM outbox_events LIMIT 1',
-      );
+      const result = await pool.query<{
+        attempts: number;
+        last_error: string | null;
+        status: string;
+      }>('SELECT status, attempts, last_error FROM outbox_events LIMIT 1');
       expect(result.rows[0]!.status).toBe('failed');
       expect(result.rows[0]!.attempts).toBeGreaterThanOrEqual(2);
       expect(result.rows[0]!.last_error).toBe('handler failure');
@@ -373,9 +375,11 @@ describe('outbox integration', () => {
 
       expect(callCount).toBeGreaterThanOrEqual(3);
 
-      const result = await pool.query<{ attempts: number; last_error: string | null; status: string }>(
-        'SELECT status, attempts, last_error FROM outbox_events LIMIT 1',
-      );
+      const result = await pool.query<{
+        attempts: number;
+        last_error: string | null;
+        status: string;
+      }>('SELECT status, attempts, last_error FROM outbox_events LIMIT 1');
       expect(result.rows[0]!.status).toBe('failed');
       expect(result.rows[0]!.attempts).toBeGreaterThanOrEqual(3);
       expect(result.rows[0]!.last_error).toBe('permanent failure');
