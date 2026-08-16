@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.0.1 — 2026-08-16
+
+Continuous integration fix and a correction to the v1.0.0 release record. **No application code
+changed**; `src/`, `migrations/`, and the test suite are identical to `v1.0.0`. Verification record:
+[docs/release/v1.0.1.md](./docs/release/v1.0.1.md).
+
+- **CI: one database per integration test file.** The workflow exported `TEST_DATABASE_URL`, pointing
+  all eight integration files at a single database while vitest ran them in parallel. Each file runs
+  the migrations itself and assumes it owns its rows, so CI deadlocked on concurrent DDL (`40P01`)
+  and read other files' data. Every CI run since Week 5 failed this way. With the variable unset,
+  Testcontainers gives each file an isolated PostgreSQL, exactly as a local `npm test` does.
+- **Record corrected.** `docs/release/v1.0.0.md` claimed the CI gate passed; that claim came from the
+  workflow definition rather than run history. It now states plainly that CI was red at the `v1.0.0`
+  tag, with the reproduction. The `v1.0.0` tag was left in place rather than moved.
+- **Documentation.** `docs/TESTING.md` no longer suggests pointing the whole suite at a shared
+  database — `TEST_DATABASE_URL` is for running one file at a time.
+
 ## v1.0.0 — 2026-08-16
 
 First release. A correctness-first double-entry payment ledger with the four v1 invariants proven by
