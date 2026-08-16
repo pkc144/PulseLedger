@@ -20,9 +20,9 @@ named test that proves it.
 
 | Command                                                       | Scope                               | Needs PostgreSQL |
 | ------------------------------------------------------------- | ----------------------------------- | ---------------- |
-| `npm test`                                                    | Everything — 126 tests in 15 files  | yes              |
-| `npm run test:unit`                                           | 47 unit tests, in-memory ports only | no               |
-| `npm run test:integration`                                    | 77 tests against real PostgreSQL    | yes              |
+| `npm test`                                                    | Everything — 151 tests in 16 files  | yes              |
+| `npm run test:unit`                                           | 54 unit tests, in-memory ports only | no               |
+| `npm run test:integration`                                    | 95 tests against real PostgreSQL    | yes              |
 | `npx vitest run tests/property`                               | 2 property tests (fast-check)       | no               |
 | `npx vitest run tests/integration/outbox.integration.test.ts` | One file                            | yes              |
 | `npx vitest run -t 'never lets two workers double-claim'`     | One test by name                    | yes              |
@@ -100,13 +100,13 @@ same suite as a local `npm test` rather than a differently-isolated variant of i
 
 ## Test inventory
 
-126 tests, 15 files.
+151 tests, 16 files.
 
 | Layer       | Files | Tests | What it proves                                                             |
 | ----------- | ----: | ----: | -------------------------------------------------------------------------- |
-| Unit        |     6 |    47 | Domain and application behavior through in-memory ports; no database       |
+| Unit        |     6 |    54 | Domain and application behavior through in-memory ports; no database       |
 | Property    |     1 |     2 | Generated postings: balanced always accepted, unequal always rejected      |
-| Integration |     8 |    77 | Real migrations, real SQL, real constraints, real concurrency and recovery |
+| Integration |     9 |    95 | Real migrations, real SQL, real constraints, real concurrency and recovery |
 
 Concurrency, recovery, and end-to-end cases live inside `tests/integration/` rather than separate
 directories: they need the same real database, and splitting them would have meant duplicating the
@@ -175,6 +175,27 @@ test you can run by name.
 | Final state matches a reference model   | `tests/integration/transfers.integration.test.ts` → _matches a sequential reference model_                                                     |
 | Retry budget is bounded and observable  | `tests/unit/transfers.test.ts` → _retries recognized database conflicts with bounded backoff and records metrics_ · _stops at the retry bound_ |
 | Locks ordered deterministically         | `tests/unit/transfers.test.ts` → _orders account locks deterministically_                                                                      |
+
+### Authentication and ownership
+
+| Evidence                                        | Test                                                                                                                                                                                  |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No credential is rejected                       | `tests/integration/auth.integration.test.ts` → _rejects a request with no Authorization header_                                                                                       |
+| Bad credentials are indistinguishable           | `tests/integration/auth.integration.test.ts` → _rejects malformed, unknown, and wrong-scheme credentials identically_                                                                 |
+| Auth runs before body validation                | `tests/integration/auth.integration.test.ts` → _authenticates before validating the body, so schemas leak nothing_                                                                    |
+| Secrets are stored hashed, never in the clear   | `tests/integration/auth.integration.test.ts` → _never stores the secret, only its hash_                                                                                               |
+| Revocation is immediate                         | `tests/integration/auth.integration.test.ts` → _stops accepting a revoked key_                                                                                                        |
+| A disabled principal loses access               | `tests/integration/auth.integration.test.ts` → _stops accepting keys belonging to a disabled principal_                                                                               |
+| Only an admin can mint credentials              | `tests/integration/auth.integration.test.ts` → _requires the admin key to mint or revoke customer credentials_                                                                        |
+| The two credentials do not substitute           | `tests/integration/hardening.integration.test.ts` → _keeps the two credentials separate in both directions_                                                                           |
+| **Cannot spend from an account you do not own** | `tests/integration/auth.integration.test.ts` → _refuses to spend from an account the caller does not own, and posts nothing_                                                          |
+| Checked under the row lock, not in the route    | `tests/unit/transfers.test.ts` → _refuses to spend from an account the caller does not own, and posts nothing_                                                                        |
+| Anyone may be paid                              | `tests/integration/auth.integration.test.ts` → _allows paying an account owned by someone else_                                                                                       |
+| Reads are owner-scoped, and leak nothing        | `tests/integration/auth.integration.test.ts` → _hides another principal's account behind a 404_ · _hides another principal's journal entries behind the same 404_                     |
+| Transfers are visible to participants only      | `tests/integration/auth.integration.test.ts` → _lets both participants read the transfer, and nobody else_                                                                            |
+| Idempotency keys are per principal              | `tests/integration/auth.integration.test.ts` → _scopes an idempotency key to its principal_ · `tests/unit/idempotency.test.ts` → _lets two principals use the same key independently_ |
+| Ownership is immutable in SQL                   | `tests/integration/auth.integration.test.ts` → _rejects a change of ownership at the database boundary_                                                                               |
+| No customer account can exist unowned           | `tests/integration/auth.integration.test.ts` → _refuses to create a customer account with no owner_                                                                                   |
 
 ### Hardening
 

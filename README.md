@@ -5,8 +5,9 @@ clients retry, and background workers crash mid-flight.
 
 TypeScript · Fastify · PostgreSQL 17 · one deployable process · no broker, no cache, no ORM.
 
-**Status: `v1.0.0`.** Feature-complete against [PROJECT_PLAN.md](./PROJECT_PLAN.md); every claim below
-is backed by a test you can run or a benchmark artifact committed in this repository.
+**Status: `v1.1.0`.** Feature-complete against [PROJECT_PLAN.md](./PROJECT_PLAN.md), plus API-key
+authentication and account ownership; every claim below is backed by a test you can run or a
+benchmark artifact committed in this repository.
 
 ## What this proves
 
@@ -26,7 +27,7 @@ Full mapping, including the concurrency and recovery matrix: [docs/TESTING.md](.
 
 | Evidence                    | Result                                                                                                                     |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Automated tests             | **126 passing** — 47 unit, 2 property, 77 integration against real PostgreSQL (`npm test`)                                 |
+| Automated tests             | **151 passing** — 54 unit, 2 property, 95 integration against real PostgreSQL (`npm test`)                                 |
 | Concurrency under real load | ~14,000 transfer attempts across 4 k6 scenarios; **zero** overdrafts, lost updates, or unbalanced transactions             |
 | Reconciliation after load   | `{ "accountsChecked": 763, "issues": [], "ok": true }` — every cached balance matched the journal exactly                  |
 | Baseline throughput         | 4,129 requests, 134.4 req/s, p50 13.1 ms, p95 269.7 ms (20 VUs, 2-vCPU PostgreSQL container)                               |
@@ -51,6 +52,20 @@ npm run db:migrate
 npm run dev                                # http://localhost:3000
 ```
 
+Customer routes require an API key, issued by an administrator:
+
+```bash
+export ADMIN_API_KEY=$(grep ADMIN_API_KEY .env | cut -d= -f2)
+PRINCIPAL=$(curl -s -X POST localhost:3000/v1/admin/principals \
+  -H 'content-type: application/json' -H "x-admin-api-key: $ADMIN_API_KEY" \
+  -d '{"name":"me"}' | node -pe 'JSON.parse(require("fs").readFileSync(0)).id')
+
+export CUSTOMER_KEY=$(curl -s -X POST localhost:3000/v1/admin/principals/$PRINCIPAL/api-keys \
+  -H "x-admin-api-key: $ADMIN_API_KEY" | node -pe 'JSON.parse(require("fs").readFileSync(0)).key')
+```
+
+The secret is shown once — only its SHA-256 hash is stored.
+
 Verify:
 
 ```bash
@@ -61,26 +76,25 @@ curl -s localhost:3000/health/ready
 Run the whole verification gate the way CI does:
 
 ```bash
-npm run check      # architecture → lint → typecheck → 126 tests → build
+npm run check      # architecture → lint → typecheck → 151 tests → build
 ```
 
 ## Move some money
 
 ```bash
-export ADMIN_API_KEY=$(grep ADMIN_API_KEY .env | cut -d= -f2)
 json() { node -pe 'JSON.parse(require("fs").readFileSync(0))'"$1"; }
 
 ALICE=$(curl -s -X POST localhost:3000/v1/accounts -H 'content-type: application/json' \
-          -d '{"currency":"INR"}' | json .id)
+          -H "authorization: Bearer $CUSTOMER_KEY" -d '{"currency":"INR"}' | json .id)
 BOB=$(curl -s -X POST localhost:3000/v1/accounts -H 'content-type: application/json' \
-        -d '{"currency":"INR"}' | json .id)
+        -H "authorization: Bearer $CUSTOMER_KEY" -d '{"currency":"INR"}' | json .id)
 
 curl -s -X POST localhost:3000/v1/admin/fund -H 'content-type: application/json' \
   -H "x-admin-api-key: $ADMIN_API_KEY" \
   -d "{\"accountId\":\"$ALICE\",\"amountMinor\":\"250000\"}"
 
 curl -s -X POST localhost:3000/v1/transfers -H 'content-type: application/json' \
-  -H 'idempotency-key: my-first-transfer' \
+  -H "authorization: Bearer $CUSTOMER_KEY" -H 'idempotency-key: my-first-transfer' \
   -d "{\"sourceAccountId\":\"$ALICE\",\"destinationAccountId\":\"$BOB\",\"amountMinor\":\"75000\"}"
 ```
 
@@ -124,11 +138,12 @@ Every endpoint, every error code, and real captured responses: [docs/API.md](./d
 ```text
 POST /v1/transfers
       │
-      ├─ claim the idempotency key            unique (key, operation)
+      ├─ authenticate                         Bearer key -> principal (before body validation)
+      ├─ claim the idempotency key            unique (principal, key, operation)
       │
       └─ BEGIN SERIALIZABLE ─────────────────────────────────────────────┐
            lock both accounts in ascending UUID order  (no deadlocks)    │
-           validate status, currency, and the locked balance             │
+           validate ownership, status, currency, and the locked balance  │
            post 2 journal entries + update 2 cached balances             │
            insert the transfer projection                                │
            insert the outbox event            ← no dual write            │
@@ -150,6 +165,9 @@ POST /v1/transfers
 - **The outbox removes the dual write.** The event and the money commit together or not at all.
 - **The consumer, not the transport, provides exactly-once.** A duplicate delivery's inbox claim
   conflicts, inserts nothing, and returns a successful no-op.
+- **Authorization is a database constraint, not a handler check.** Every customer account has an
+  immutable owner; spending is validated against the locked row inside the transfer transaction, and
+  anything you do not own answers `404`, never `403`.
 
 Diagrams: [system architecture](./docs/diagrams/architecture.md) ·
 [transaction flows](./docs/diagrams/transfer-flow.md). Written contract:
@@ -161,15 +179,16 @@ Decision records:
 - [ADR-002 — Serializable transfers, deterministic locking, bounded retries](./docs/adr/002-serializable-locking-retries.md)
 - [ADR-003 — Transactional outbox instead of a dual write](./docs/adr/003-transactional-outbox.md)
 - [ADR-004 — Modular monolith with a database-backed worker](./docs/adr/004-modular-monolith-database-worker.md)
+- [ADR-005 — API-key authentication with database-enforced account ownership](./docs/adr/005-api-key-authentication-account-ownership.md)
 
 ## Commands
 
 ```bash
 npm run dev                # watch mode
 npm run check              # architecture + lint + typecheck + tests + build (the local gate)
-npm test                   # 126 tests (Testcontainers starts PostgreSQL if needed)
-npm run test:unit          # 47 tests, no database
-npm run test:integration   # 77 tests against real PostgreSQL
+npm test                   # 151 tests (Testcontainers starts PostgreSQL if needed)
+npm run test:unit          # 54 tests, no database
+npm run test:integration   # 95 tests against real PostgreSQL
 npm run db:migrate         # apply pending migrations
 npm run reconcile          # recompute balances from the journal; non-zero exit on drift
 npm run seed               # realistic dataset via the real services (SEED_ACCOUNTS / SEED_TRANSFERS)
@@ -201,7 +220,7 @@ Benchmark commands and per-scenario intent: [docs/TESTING.md](./docs/TESTING.md)
 
 ## What this is not
 
-Customer routes are unauthenticated, there is one static admin key, metrics are in-process only, and
+There is one static admin key, API keys have no scopes or expiry, metrics are in-process only, and
 the outbox has no retention policy — this is a correctness demonstrator, not a deployable payments
 platform. The full honest list, with the seams each extension would use, is in
 [docs/TRADEOFFS.md](./docs/TRADEOFFS.md).

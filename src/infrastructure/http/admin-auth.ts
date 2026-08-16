@@ -5,9 +5,10 @@ import { AppError } from '../../errors.js';
 export const adminApiKeyHeader = 'x-admin-api-key';
 
 /**
- * Fastify preHandler guarding administrative routes with a shared secret. Wired only at the
+ * Fastify `onRequest` hook guarding administrative routes with a shared secret. Wired only at the
  * composition root (app.ts) around an encapsulated child context, so feature route files stay
- * unaware of authentication entirely.
+ * unaware of authentication entirely. Runs before body validation for the same reason as the
+ * customer guard: an unauthenticated caller learns nothing about admin request schemas.
  */
 export function requireAdminApiKey(expectedKey: string) {
   const expected = Buffer.from(expectedKey, 'utf8');

@@ -4,6 +4,7 @@
 import { check, sleep } from 'k6';
 import {
   buildAccountPool,
+  provisionCustomerKey,
   getMetrics,
   pickTwoDistinct,
   randomAmount,
@@ -29,15 +30,16 @@ export const options = {
 };
 
 export function setup() {
-  const accounts = buildAccountPool(ACCOUNT_POOL_SIZE, 'INR', '10000000');
+  const apiKey = provisionCustomerKey('normal-transfer');
+  const accounts = buildAccountPool(ACCOUNT_POOL_SIZE, 'INR', '10000000', apiKey);
   const before = getMetrics();
-  return { accounts, before };
+  return { accounts, apiKey, before };
 }
 
 export default function (data) {
   const [source, destination] = pickTwoDistinct(data.accounts);
   const idempotencyKey = `normal-transfer-${__VU}-${__ITER}-${Date.now()}-${Math.random()}`;
-  const res = transfer(source, destination, randomAmount(1, 100), idempotencyKey);
+  const res = transfer(source, destination, randomAmount(1, 100), idempotencyKey, data.apiKey);
   check(res, { 'transfer succeeded (201)': (r) => r.status === 201 });
   sleep(0.1);
 }

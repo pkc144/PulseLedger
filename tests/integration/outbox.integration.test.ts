@@ -5,6 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../../src/app.js';
 import { createPool } from '../../src/infrastructure/database/pool.js';
 import { runMigrations } from '../../src/infrastructure/database/migrate.js';
+import { createTestPrincipal, type TestPrincipal } from '../helpers/auth.js';
 import { PostgresOutboxStore } from '../../src/modules/outbox/outbox-repository.js';
 import { OutboxWorker } from '../../src/modules/outbox/outbox-worker.js';
 import {
@@ -19,6 +20,7 @@ let container: StartedPostgreSqlContainer | undefined;
 let pool: pg.Pool;
 let outboxStore: OutboxStore;
 let app: Awaited<ReturnType<typeof buildApp>>;
+let principal: TestPrincipal;
 
 beforeAll(async () => {
   let databaseUrl = process.env.TEST_DATABASE_URL;
@@ -35,6 +37,7 @@ beforeAll(async () => {
   await runMigrations(pool);
   outboxStore = new PostgresOutboxStore(pool);
   app = await buildApp({ adminApiKey: testAdminApiKey, database: pool, outboxStore });
+  principal = await createTestPrincipal(pool, 'integration');
 });
 
 afterAll(async () => {
@@ -60,6 +63,7 @@ async function createAccount(currency: 'INR' | 'USD' = 'INR'): Promise<string> {
   const response = await app.inject({
     method: 'POST',
     url: '/v1/accounts',
+    headers: { ...principal.authHeaders },
     payload: { currency },
   });
   expect(response.statusCode).toBe(201);
@@ -84,7 +88,7 @@ describe('outbox integration', () => {
       await fund(sourceId, '5000');
 
       const response = await app.inject({
-        headers: { 'idempotency-key': randomUUID() },
+        headers: { ...principal.authHeaders, 'idempotency-key': randomUUID() },
         method: 'POST',
         url: '/v1/transfers',
         payload: {
@@ -117,7 +121,7 @@ describe('outbox integration', () => {
       await fund(sourceId, '1000');
 
       const response = await app.inject({
-        headers: { 'idempotency-key': randomUUID() },
+        headers: { ...principal.authHeaders, 'idempotency-key': randomUUID() },
         method: 'POST',
         url: '/v1/transfers',
         payload: {

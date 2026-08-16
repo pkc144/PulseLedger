@@ -25,11 +25,12 @@ Have two terminals ready: one for the server, one for requests. Have
 
 | #   | Beat                                  | Target | Cumulative |
 | --- | ------------------------------------- | -----: | ---------: |
-| 1   | Problem and the four invariants       |   0:25 |       0:25 |
-| 2   | Accounts, funding, one transfer       |   0:30 |       0:55 |
-| 3   | 50 concurrent duplicates → 1 transfer |   0:30 |       1:25 |
-| 4   | Kill the worker, restart, one effect  |   0:45 |       2:10 |
-| 5   | Reconciliation from the journal       |   0:20 |       2:30 |
+| 1   | Problem and the four invariants       |   0:20 |       0:20 |
+| 2   | Key, accounts, funding, one transfer  |   0:30 |       0:50 |
+| 3   | 50 concurrent duplicates → 1 transfer |   0:25 |       1:15 |
+| 3b  | Another principal is locked out       |   0:20 |       1:35 |
+| 4   | Kill the worker, restart, one effect  |   0:40 |       2:15 |
+| 5   | Reconciliation from the journal       |   0:15 |       2:30 |
 | 6   | Measured load and the bottleneck      |   0:25 |       2:55 |
 
 ---
@@ -56,13 +57,26 @@ OUTBOX_POLL_INTERVAL_MS=15000 node dist/server.js
 
 (The slow poll interval is only so beat 4 can win a race by hand.)
 
-### 2 — Money moves once, and it balances (0:30)
+### 2 — A credential, then money that moves once and balances (0:30)
 
 ```bash
+# An administrator mints a customer identity and one key. The secret is shown exactly once.
+PRINCIPAL=$(curl -s -X POST localhost:3000/v1/admin/principals \
+  -H 'content-type: application/json' -H "x-admin-api-key: $ADMIN_API_KEY" \
+  -d '{"name":"demo"}' | node -pe 'JSON.parse(require("fs").readFileSync(0)).id')
+export CUSTOMER_KEY=$(curl -s -X POST localhost:3000/v1/admin/principals/$PRINCIPAL/api-keys \
+  -H "x-admin-api-key: $ADMIN_API_KEY" | node -pe 'JSON.parse(require("fs").readFileSync(0)).key')
+
+# Without it, nothing customer-facing answers -- and the 401 comes before schema validation.
+curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:3000/v1/transfers \
+  -H 'content-type: application/json' -d '{}'          # 401
+
 ALICE=$(curl -s -X POST localhost:3000/v1/accounts -H 'content-type: application/json' \
-  -d '{"currency":"INR"}' | node -pe 'JSON.parse(require("fs").readFileSync(0)).id')
+  -H "authorization: Bearer $CUSTOMER_KEY" -d '{"currency":"INR"}' \
+  | node -pe 'JSON.parse(require("fs").readFileSync(0)).id')
 BOB=$(curl -s -X POST localhost:3000/v1/accounts -H 'content-type: application/json' \
-  -d '{"currency":"INR"}' | node -pe 'JSON.parse(require("fs").readFileSync(0)).id')
+  -H "authorization: Bearer $CUSTOMER_KEY" -d '{"currency":"INR"}' \
+  | node -pe 'JSON.parse(require("fs").readFileSync(0)).id')
 
 curl -s -X POST localhost:3000/v1/admin/fund -H 'content-type: application/json' \
   -H "x-admin-api-key: $ADMIN_API_KEY" \
@@ -72,8 +86,8 @@ curl -s -X POST localhost:3000/v1/transfers -H 'content-type: application/json' 
   -H 'idempotency-key: demo-1' \
   -d "{\"sourceAccountId\":\"$ALICE\",\"destinationAccountId\":\"$BOB\",\"amountMinor\":\"75000\"}"
 
-curl -s localhost:3000/v1/accounts/$ALICE   # balanceMinor "175000"
-curl -s localhost:3000/v1/accounts/$BOB     # balanceMinor "75000"
+curl -s localhost:3000/v1/accounts/$ALICE -H "authorization: Bearer $CUSTOMER_KEY"  # "175000"
+curl -s localhost:3000/v1/accounts/$BOB   -H "authorization: Bearer $CUSTOMER_KEY"  # "75000"
 ```
 
 > "Balances are integer minor units as strings — no floats anywhere. Funding is not a balance edit;
@@ -100,7 +114,28 @@ curl -s localhost:3000/v1/admin/metrics -H "x-admin-api-key: $ADMIN_API_KEY"
 
 Point at: `transfers.completed` incremented by 1.
 
-### 4 — Kill the process, restart, exactly one effect (0:45)
+### 3b — Another principal cannot touch any of it (0:20)
+
+```bash
+INTRUDER=$(curl -s -X POST localhost:3000/v1/admin/principals \
+  -H 'content-type: application/json' -H "x-admin-api-key: $ADMIN_API_KEY" \
+  -d '{"name":"intruder"}' | node -pe 'JSON.parse(require("fs").readFileSync(0)).id')
+INTRUDER_KEY=$(curl -s -X POST localhost:3000/v1/admin/principals/$INTRUDER/api-keys \
+  -H "x-admin-api-key: $ADMIN_API_KEY" | node -pe 'JSON.parse(require("fs").readFileSync(0)).key')
+
+PAYLOAD="{\"sourceAccountId\":\"$ALICE\",\"destinationAccountId\":\"$BOB\",\"amountMinor\":\"1000\"}"
+curl -s -o /dev/null -w 'read account:  %{http_code}\n' localhost:3000/v1/accounts/$ALICE \
+  -H "authorization: Bearer $INTRUDER_KEY"                                    # 404
+curl -s -o /dev/null -w 'spend from it: %{http_code}\n' -X POST localhost:3000/v1/transfers \
+  -H 'content-type: application/json' -H "authorization: Bearer $INTRUDER_KEY" -d "$PAYLOAD"  # 404
+```
+
+> "A perfectly valid credential — it just does not own this account. Note it is a **404, not a
+> 403**: the API never confirms that someone else's account exists, so it cannot be used to
+> enumerate accounts. And the ownership check happens against the row locked inside the transfer's
+> `SERIALIZABLE` transaction, not in the route, so it cannot be raced."
+
+### 4 — Kill the process, restart, exactly one effect (0:40)
 
 ```bash
 curl -s -X POST localhost:3000/v1/transfers -H 'content-type: application/json' \

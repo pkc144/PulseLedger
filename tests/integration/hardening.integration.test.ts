@@ -4,12 +4,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../../src/app.js';
 import { createPool } from '../../src/infrastructure/database/pool.js';
 import { runMigrations } from '../../src/infrastructure/database/migrate.js';
+import { createTestPrincipal, type TestPrincipal } from '../helpers/auth.js';
 
 const testAdminApiKey = 'test-admin-api-key-0123456789';
 
 let container: StartedPostgreSqlContainer | undefined;
 let pool: pg.Pool;
 let app: Awaited<ReturnType<typeof buildApp>>;
+let principal: TestPrincipal;
 
 beforeAll(async () => {
   let databaseUrl = process.env.TEST_DATABASE_URL;
@@ -34,6 +36,7 @@ beforeAll(async () => {
       requestTimeoutMs: 30_000,
     },
   });
+  principal = await createTestPrincipal(pool, 'integration');
 });
 
 afterAll(async () => {
@@ -56,6 +59,7 @@ async function createAccount(): Promise<string> {
   const response = await app.inject({
     method: 'POST',
     url: '/v1/accounts',
+    headers: { ...principal.authHeaders },
     payload: { currency: 'INR' },
   });
   expect(response.statusCode).toBe(201);
@@ -96,16 +100,41 @@ describe('admin API key protection', () => {
     expect(response.statusCode).toBe(201);
   });
 
-  it('never protects customer-facing or health routes', async () => {
+  it('keeps the two credentials separate in both directions', async () => {
+    // A customer key opens customer routes...
     const account = await app.inject({
       method: 'POST',
       url: '/v1/accounts',
+      headers: { ...principal.authHeaders },
       payload: { currency: 'INR' },
     });
     expect(account.statusCode).toBe(201);
 
+    // ...but not admin routes, even though it is a perfectly valid credential.
+    const fundWithCustomerKey = await app.inject({
+      method: 'POST',
+      url: '/v1/admin/fund',
+      headers: { ...principal.authHeaders },
+      payload: { accountId: account.json<{ id: string }>().id, amountMinor: '100' },
+    });
+    expect(fundWithCustomerKey.statusCode).toBe(401);
+
+    // And the admin key does not stand in for a customer credential.
+    const accountWithAdminKey = await app.inject({
+      method: 'POST',
+      url: '/v1/accounts',
+      headers: { 'x-admin-api-key': testAdminApiKey },
+      payload: { currency: 'INR' },
+    });
+    expect(accountWithAdminKey.statusCode).toBe(401);
+  });
+
+  it('leaves health routes unauthenticated', async () => {
     const live = await app.inject({ method: 'GET', url: '/health/live' });
     expect(live.statusCode).toBe(200);
+
+    const ready = await app.inject({ method: 'GET', url: '/health/ready' });
+    expect(ready.statusCode).toBe(200);
   });
 });
 
@@ -149,7 +178,7 @@ describe('admin metrics', () => {
     const transferResponse = await app.inject({
       method: 'POST',
       url: '/v1/transfers',
-      headers: { 'idempotency-key': `metrics-test-${source}` },
+      headers: { ...principal.authHeaders, 'idempotency-key': `metrics-test-${source}` },
       payload: { sourceAccountId: source, destinationAccountId: destination, amountMinor: '100' },
     });
     expect(transferResponse.statusCode).toBe(201);
@@ -169,7 +198,7 @@ describe('request body limit', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/v1/accounts',
-      headers: { 'content-type': 'application/json' },
+      headers: { ...principal.authHeaders, 'content-type': 'application/json' },
       payload: JSON.stringify({ currency: 'INR', padding: 'x'.repeat(1024) }),
     });
     expect(response.statusCode).toBe(413);

@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../../src/app.js';
 import { createPool } from '../../src/infrastructure/database/pool.js';
 import { runMigrations } from '../../src/infrastructure/database/migrate.js';
+import { createTestPrincipal, type TestPrincipal } from '../helpers/auth.js';
 import type { ReconciliationReport } from '../../src/modules/reconciliation/reconciliation-domain.js';
 import { PostgresReconciliationStore } from '../../src/modules/reconciliation/reconciliation-repository.js';
 
@@ -13,6 +14,7 @@ let container: StartedPostgreSqlContainer | undefined;
 let pool: pg.Pool;
 let store: PostgresReconciliationStore;
 let app: Awaited<ReturnType<typeof buildApp>>;
+let principal: TestPrincipal;
 
 beforeAll(async () => {
   let databaseUrl = process.env.TEST_DATABASE_URL;
@@ -29,6 +31,7 @@ beforeAll(async () => {
   await runMigrations(pool);
   store = new PostgresReconciliationStore(pool);
   app = await buildApp({ adminApiKey: testAdminApiKey, database: pool });
+  principal = await createTestPrincipal(pool, 'integration');
 });
 
 afterAll(async () => {
@@ -51,7 +54,12 @@ beforeEach(async () => {
 });
 
 async function createAccount(currency: 'INR' | 'USD' = 'INR'): Promise<string> {
-  const response = await app.inject({ method: 'POST', url: '/v1/accounts', payload: { currency } });
+  const response = await app.inject({
+    method: 'POST',
+    url: '/v1/accounts',
+    payload: { currency },
+    headers: { ...principal.authHeaders },
+  });
   expect(response.statusCode).toBe(201);
   return response.json<{ id: string }>().id;
 }

@@ -50,6 +50,8 @@ export interface LedgerAccount {
   currency: string;
   id: string;
   isTreasury: boolean;
+  /** Null for treasuries, which belong to the system rather than to a customer. */
+  ownerPrincipalId: string | null;
   status: 'active' | 'frozen' | 'closed';
 }
 
@@ -153,8 +155,13 @@ export interface ListJournalEntriesOptions {
 
 export interface LedgerApplication {
   fundAccount(input: FundAccountInput): Promise<FundingResult>;
+  /**
+   * Journal entries are readable only by the principal that owns the account. `fundAccount` takes
+   * no principal because it is an administrative operation, guarded by the admin API key.
+   */
   listJournalEntries(
     accountId: string,
+    ownerPrincipalId: string,
     options?: ListJournalEntriesOptions,
   ): Promise<ListJournalEntriesResult>;
 }

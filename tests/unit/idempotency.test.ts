@@ -11,6 +11,9 @@ import {
   IdempotencyService,
 } from '../../src/modules/idempotency/idempotency-service.js';
 
+const principalId = '00000000-0000-4000-8000-0000000000a1';
+const otherPrincipalId = '00000000-0000-4000-8000-0000000000a2';
+
 class FakeIdempotencyStore implements IdempotencyStore {
   private records = new Map<string, IdempotencyRecord>();
 
@@ -18,9 +21,11 @@ class FakeIdempotencyStore implements IdempotencyStore {
     fingerprint: string;
     key: string;
     operation: string;
+    principalId: string;
     staleTimeoutMs: number;
   }): Promise<ClaimResult> {
-    const compoundKey = `${params.key}:${params.operation}`;
+    // Mirrors the unique index: identity is (principal, key, operation), not (key, operation).
+    const compoundKey = `${params.principalId}:${params.key}:${params.operation}`;
     const existing = this.records.get(compoundKey);
 
     if (!existing) {
@@ -69,10 +74,11 @@ class FakeIdempotencyStore implements IdempotencyStore {
   public async complete(params: {
     key: string;
     operation: string;
+    principalId: string;
     responseBody: unknown;
     responseStatus: number;
   }): Promise<void> {
-    const compoundKey = `${params.key}:${params.operation}`;
+    const compoundKey = `${params.principalId}:${params.key}:${params.operation}`;
     const record = this.records.get(compoundKey);
     if (record) {
       record.status = 'completed';
@@ -82,8 +88,12 @@ class FakeIdempotencyStore implements IdempotencyStore {
     }
   }
 
-  public getRecord(key: string, operation: string): IdempotencyRecord | undefined {
-    return this.records.get(`${key}:${operation}`);
+  public getRecord(
+    key: string,
+    operation: string,
+    owner: string = principalId,
+  ): IdempotencyRecord | undefined {
+    return this.records.get(`${owner}:${key}:${operation}`);
   }
 }
 
@@ -124,7 +134,7 @@ describe('idempotency service', () => {
   it('returns null on first request (claim succeeds)', async () => {
     const store = new FakeIdempotencyStore();
     const service = new IdempotencyService(store);
-    const result = await service.claimOrReplay('key-1', 'transfer', requestBody);
+    const result = await service.claimOrReplay('key-1', 'transfer', principalId, requestBody);
     expect(result).toBeNull();
 
     const record = store.getRecord('key-1', 'transfer');
@@ -135,15 +145,16 @@ describe('idempotency service', () => {
     const store = new FakeIdempotencyStore();
     const service = new IdempotencyService(store);
 
-    await service.claimOrReplay('key-1', 'transfer', requestBody);
+    await service.claimOrReplay('key-1', 'transfer', principalId, requestBody);
     await store.complete({
+      principalId,
       key: 'key-1',
       operation: 'transfer',
       responseBody: { id: 'transfer-1' },
       responseStatus: 201,
     });
 
-    const result = await service.claimOrReplay('key-1', 'transfer', requestBody);
+    const result = await service.claimOrReplay('key-1', 'transfer', principalId, requestBody);
     expect(result).toEqual({ body: { id: 'transfer-1' }, status: 201 });
   });
 
@@ -151,10 +162,10 @@ describe('idempotency service', () => {
     const store = new FakeIdempotencyStore();
     const service = new IdempotencyService(store);
 
-    await service.claimOrReplay('key-1', 'transfer', requestBody);
+    await service.claimOrReplay('key-1', 'transfer', principalId, requestBody);
 
     await expect(
-      service.claimOrReplay('key-1', 'transfer', {
+      service.claimOrReplay('key-1', 'transfer', principalId, {
         sourceAccountId: 'src',
         destinationAccountId: 'dst',
         amountMinor: '200',
@@ -166,9 +177,11 @@ describe('idempotency service', () => {
     const store = new FakeIdempotencyStore();
     const service = new IdempotencyService(store);
 
-    await service.claimOrReplay('key-1', 'transfer', requestBody);
+    await service.claimOrReplay('key-1', 'transfer', principalId, requestBody);
 
-    await expect(service.claimOrReplay('key-1', 'transfer', requestBody)).rejects.toMatchObject({
+    await expect(
+      service.claimOrReplay('key-1', 'transfer', principalId, requestBody),
+    ).rejects.toMatchObject({
       code: 'IDEMPOTENCY_IN_PROGRESS',
     });
   });
@@ -177,23 +190,37 @@ describe('idempotency service', () => {
     const store = new FakeIdempotencyStore();
     const service = new IdempotencyService(store, { staleTimeoutMs: 10 });
 
-    await service.claimOrReplay('key-1', 'transfer', requestBody);
+    await service.claimOrReplay('key-1', 'transfer', principalId, requestBody);
 
     const record = store.getRecord('key-1', 'transfer')!;
     record.createdAt = new Date(Date.now() - 20).toISOString();
 
-    const result = await service.claimOrReplay('key-1', 'transfer', requestBody);
+    const result = await service.claimOrReplay('key-1', 'transfer', principalId, requestBody);
     expect(result).toBeNull();
+  });
+
+  it('lets two principals use the same key independently', async () => {
+    const store = new FakeIdempotencyStore();
+    const service = new IdempotencyService(store);
+
+    expect(
+      await service.claimOrReplay('order-42', 'transfer', principalId, requestBody),
+    ).toBeNull();
+    // A different caller sending the identical key and body is a different unit of work: it must
+    // claim its own record rather than conflicting with, or replaying, the first caller's.
+    expect(
+      await service.claimOrReplay('order-42', 'transfer', otherPrincipalId, requestBody),
+    ).toBeNull();
   });
 
   it('allows same key for different operations', async () => {
     const store = new FakeIdempotencyStore();
     const service = new IdempotencyService(store);
 
-    const transfer = await service.claimOrReplay('key-1', 'transfer', requestBody);
+    const transfer = await service.claimOrReplay('key-1', 'transfer', principalId, requestBody);
     expect(transfer).toBeNull();
 
-    const funding = await service.claimOrReplay('key-1', 'fund', { amount: '100' });
+    const funding = await service.claimOrReplay('key-1', 'fund', principalId, { amount: '100' });
     expect(funding).toBeNull();
 
     expect(store.getRecord('key-1', 'transfer')?.operation).toBe('transfer');

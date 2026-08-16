@@ -41,17 +41,19 @@ export class PostgresIdempotencyStore implements IdempotencyStore {
     fingerprint: string;
     key: string;
     operation: string;
+    principalId: string;
     staleTimeoutMs: number;
   }): Promise<ClaimResult> {
-    const { fingerprint, key, operation, staleTimeoutMs } = params;
+    const { fingerprint, key, operation, principalId, staleTimeoutMs } = params;
 
     const inserted = await this.database.query<IdempotencyRow>(
-      `INSERT INTO idempotency_records (key, operation, request_fingerprint, status)
-       VALUES ($1, $2, $3, 'in_progress')
-       ON CONFLICT (key, operation) DO NOTHING
+      `INSERT INTO idempotency_records
+         (principal_id, key, operation, request_fingerprint, status)
+       VALUES ($4, $1, $2, $3, 'in_progress')
+       ON CONFLICT (principal_id, key, operation) DO NOTHING
        RETURNING key, operation, request_fingerprint, status, response_status_code,
                  response_body, created_at, completed_at`,
-      [key, operation, fingerprint],
+      [key, operation, fingerprint, principalId],
     );
 
     if (inserted.rows[0]) {
@@ -62,8 +64,8 @@ export class PostgresIdempotencyStore implements IdempotencyStore {
       `SELECT key, operation, request_fingerprint, status, response_status_code,
               response_body, created_at, completed_at
        FROM idempotency_records
-       WHERE key = $1 AND operation = $2`,
-      [key, operation],
+       WHERE key = $1 AND operation = $2 AND principal_id = $3`,
+      [key, operation, principalId],
     );
 
     const record = toRecord(existing.rows[0]!);
@@ -90,17 +92,17 @@ export class PostgresIdempotencyStore implements IdempotencyStore {
       await this.database.query(
         `UPDATE idempotency_records
          SET request_fingerprint = $3, created_at = now(), completed_at = NULL
-         WHERE key = $1 AND operation = $2 AND status = 'in_progress'
+         WHERE key = $1 AND operation = $2 AND principal_id = $5 AND status = 'in_progress'
            AND created_at < $4`,
-        [key, operation, fingerprint, staleThreshold.toISOString()],
+        [key, operation, fingerprint, staleThreshold.toISOString(), principalId],
       );
 
       const reclaimed = await this.database.query<IdempotencyRow>(
         `SELECT key, operation, request_fingerprint, status, response_status_code,
                 response_body, created_at, completed_at
          FROM idempotency_records
-         WHERE key = $1 AND operation = $2`,
-        [key, operation],
+         WHERE key = $1 AND operation = $2 AND principal_id = $3`,
+        [key, operation, principalId],
       );
 
       if (reclaimed.rows[0] && reclaimed.rows[0].status === 'in_progress') {
@@ -122,6 +124,7 @@ export class PostgresIdempotencyStore implements IdempotencyStore {
   public async complete(params: {
     key: string;
     operation: string;
+    principalId: string;
     responseBody: unknown;
     responseStatus: number;
   }): Promise<void> {
@@ -131,8 +134,14 @@ export class PostgresIdempotencyStore implements IdempotencyStore {
            response_status_code = $3,
            response_body = $4,
            completed_at = now()
-       WHERE key = $1 AND operation = $2 AND status = 'in_progress'`,
-      [params.key, params.operation, params.responseStatus, params.responseBody],
+       WHERE key = $1 AND operation = $2 AND principal_id = $5 AND status = 'in_progress'`,
+      [
+        params.key,
+        params.operation,
+        params.responseStatus,
+        params.responseBody,
+        params.principalId,
+      ],
     );
   }
 }

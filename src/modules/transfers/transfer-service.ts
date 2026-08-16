@@ -93,6 +93,7 @@ export class TransferService implements TransferApplication {
 
   public async create(
     input: CreateTransferInput,
+    principalId: string,
     options?: CreateTransferOptions,
   ): Promise<Transfer> {
     const amount = Money.fromMinor(input.amountMinor);
@@ -119,6 +120,12 @@ export class TransferService implements TransferApplication {
           if (!source || source.isTreasury || !destination || destination.isTreasury) {
             throw new TransferError('ACCOUNT_NOT_FOUND', 'Account not found');
           }
+          // Authorization sits inside the transaction, checked against the locked row: a caller
+          // may only spend from an account it owns, and may pay any customer account. Reported as
+          // ACCOUNT_NOT_FOUND rather than a distinct 403 so probing cannot enumerate accounts.
+          if (source.ownerPrincipalId !== principalId) {
+            throw new TransferError('ACCOUNT_NOT_FOUND', 'Account not found');
+          }
           if (source.status !== 'active' || destination.status !== 'active') {
             throw new TransferError('ACCOUNT_NOT_ACTIVE', 'Both accounts must be active');
           }
@@ -140,7 +147,7 @@ export class TransferService implements TransferApplication {
             reference,
             sourceAccountId: source.id,
             idempotency: idempotencyKey
-              ? { key: idempotencyKey, operation: 'transfer' }
+              ? { key: idempotencyKey, operation: 'transfer', principalId }
               : undefined,
           });
         });
@@ -176,8 +183,8 @@ export class TransferService implements TransferApplication {
     throw new Error('unreachable transfer retry state');
   }
 
-  public async findById(id: string): Promise<Transfer> {
-    const transfer = await this.store.findById(id);
+  public async findById(id: string, principalId: string): Promise<Transfer> {
+    const transfer = await this.store.findVisibleById(id, principalId);
     if (!transfer) throw new TransferError('TRANSFER_NOT_FOUND', 'Transfer not found');
     return transfer;
   }

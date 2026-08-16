@@ -3,12 +3,16 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import type { RequestLimitsConfig } from './config.js';
 import { errorHandler } from './errors.js';
 import { requireAdminApiKey } from './infrastructure/http/admin-auth.js';
+import { requireApiKey } from './infrastructure/http/api-key-auth.js';
 import { withRedaction } from './infrastructure/http/logging.js';
 import { PostgresIdempotencyStore } from './modules/idempotency/idempotency-repository.js';
 import { IdempotencyService } from './modules/idempotency/idempotency-service.js';
 import { PostgresAccountStore } from './modules/accounts/account-repository.js';
 import { accountRoutes } from './modules/accounts/account-routes.js';
 import { AccountService } from './modules/accounts/account-service.js';
+import { PostgresAuthStore } from './modules/auth/auth-repository.js';
+import { authRoutes } from './modules/auth/auth-routes.js';
+import { AuthService } from './modules/auth/auth-service.js';
 import { healthRoutes } from './modules/health/health-routes.js';
 import { PostgresLedgerStore } from './modules/ledger/ledger-repository.js';
 import { ledgerRoutes } from './modules/ledger/ledger-routes.js';
@@ -99,33 +103,50 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const idempotencyStore = new PostgresIdempotencyStore(options.database);
   const outboxStore = options.outboxStore;
   const ledgerService = new LedgerPostingService(new PostgresLedgerStore(options.database));
+  const authService = new AuthService(new PostgresAuthStore(options.database));
 
+  // Health is the only unauthenticated surface: a load balancer cannot hold a credential, and
+  // liveness/readiness expose no customer data.
   await app.register(healthRoutes, {
     database: options.database,
     ...(outboxStore ? { outboxStats: () => outboxStore.stats() } : {}),
   });
-  await app.register(accountRoutes, {
-    ledger: ledgerService,
-    service: new AccountService(new PostgresAccountStore(options.database)),
-  });
-  await app.register(transferRoutes, {
-    idempotency: new IdempotencyService(idempotencyStore),
-    service: new TransferService(new PostgresTransferStore(options.database, outboxStore), {
-      metrics: transferMetrics,
-      telemetry: {
-        completed: (event) => app.log.info(event, 'transfer completed'),
-        retrying: (event) => app.log.warn(event, 'retrying transfer transaction'),
-      },
-    }),
+
+  // Customer routes share one API-key guard in an encapsulated child context, mirroring how the
+  // admin routes below are guarded. The route files never import authentication; they read the
+  // resolved principal from the request and use it to scope every query.
+  await app.register(async (customerApp) => {
+    customerApp.addHook(
+      'onRequest',
+      requireApiKey(async (secret) => await authService.authenticate(secret)),
+    );
+
+    await customerApp.register(accountRoutes, {
+      ledger: ledgerService,
+      service: new AccountService(new PostgresAccountStore(options.database)),
+    });
+    await customerApp.register(transferRoutes, {
+      idempotency: new IdempotencyService(idempotencyStore),
+      service: new TransferService(new PostgresTransferStore(options.database, outboxStore), {
+        metrics: transferMetrics,
+        telemetry: {
+          completed: (event) => app.log.info(event, 'transfer completed'),
+          retrying: (event) => app.log.warn(event, 'retrying transfer transaction'),
+        },
+      }),
+    });
   });
 
   // Administrative routes share one API-key guard, applied via an encapsulated child context.
   // Fastify plugin encapsulation keeps this preHandler from leaking to any route registered
   // above, so ledgerRoutes/reconciliationRoutes stay unaware that auth exists at all.
   await app.register(async (adminApp) => {
-    adminApp.addHook('preHandler', requireAdminApiKey(options.adminApiKey));
+    adminApp.addHook('onRequest', requireAdminApiKey(options.adminApiKey));
 
     await adminApp.register(ledgerRoutes, { service: ledgerService });
+    // Customer credentials are minted and revoked only by an administrator: a customer key can
+    // never issue another key, for itself or anyone else.
+    await adminApp.register(authRoutes, { service: authService });
     await adminApp.register(reconciliationRoutes, {
       service: new ReconciliationService(new PostgresReconciliationStore(options.database)),
     });

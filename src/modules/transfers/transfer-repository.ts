@@ -13,6 +13,7 @@ interface AccountRow extends Record<string, unknown> {
   currency: string;
   id: string;
   is_treasury: boolean;
+  owner_principal_id: string | null;
   status: LockedTransferAccount['status'];
 }
 
@@ -50,7 +51,7 @@ class PostgresTransferTransaction implements TransferTransaction {
     accountIds: readonly [string, string],
   ): Promise<readonly LockedTransferAccount[]> {
     const result = await this.database.query<AccountRow>(
-      `SELECT id, currency, status, balance_minor::text, is_treasury
+      `SELECT id, currency, status, balance_minor::text, is_treasury, owner_principal_id
        FROM accounts
        WHERE id = ANY($1::uuid[])
        ORDER BY id
@@ -62,6 +63,7 @@ class PostgresTransferTransaction implements TransferTransaction {
       currency: row.currency,
       id: row.id,
       isTreasury: row.is_treasury,
+      ownerPrincipalId: row.owner_principal_id,
       status: row.status,
     }));
   }
@@ -73,7 +75,7 @@ class PostgresTransferTransaction implements TransferTransaction {
     id: string;
     reference: string;
     sourceAccountId: string;
-    idempotency?: { key: string; operation: string };
+    idempotency?: { key: string; operation: string; principalId: string };
   }): Promise<Transfer> {
     const transaction = await this.database.query<{ created_at: Date }>(
       `SELECT created_at
@@ -131,8 +133,14 @@ class PostgresTransferTransaction implements TransferTransaction {
              response_status_code = $1,
              response_body = $2,
              completed_at = now()
-         WHERE key = $3 AND operation = $4 AND status = 'in_progress'`,
-        [201, transfer, input.idempotency.key, input.idempotency.operation],
+         WHERE key = $3 AND operation = $4 AND principal_id = $5 AND status = 'in_progress'`,
+        [
+          201,
+          transfer,
+          input.idempotency.key,
+          input.idempotency.operation,
+          input.idempotency.principalId,
+        ],
       );
     }
 
@@ -146,15 +154,23 @@ export class PostgresTransferStore implements TransferStore {
     private readonly outboxStore?: OutboxStore,
   ) {}
 
-  public async findById(id: string): Promise<Transfer | null> {
+  public async findVisibleById(id: string, principalId: string): Promise<Transfer | null> {
+    // Either side of a transfer may read it, so a payee can confirm money arrived without being
+    // able to see transfers it was not part of. Non-participants get null, hence a 404.
     const result = await this.database.query<TransferRow>(
       `SELECT transfer.id, transfer.source_account_id, transfer.destination_account_id,
               transfer.amount_minor::text, transfer.currency, transfer.status,
               ledger_transaction.created_at, ledger_transaction.reference
        FROM transfers AS transfer
        JOIN ledger_transactions AS ledger_transaction ON ledger_transaction.id = transfer.id
-       WHERE transfer.id = $1`,
-      [id],
+       WHERE transfer.id = $1
+         AND EXISTS (
+           SELECT 1
+           FROM accounts AS participant
+           WHERE participant.id IN (transfer.source_account_id, transfer.destination_account_id)
+             AND participant.owner_principal_id = $2
+         )`,
+      [id, principalId],
     );
     const row = result.rows[0];
     return row ? toTransfer(row) : null;

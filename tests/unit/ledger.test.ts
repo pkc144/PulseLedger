@@ -15,6 +15,9 @@ import {
 } from '../../src/modules/ledger/ledger-domain.js';
 import { LedgerPostingService } from '../../src/modules/ledger/ledger-service.js';
 
+const principalId = '00000000-0000-4000-8000-0000000000a1';
+const otherPrincipalId = '00000000-0000-4000-8000-0000000000a2';
+
 class MemoryLedgerStore implements LedgerStore {
   public posted: PostingInput[] = [];
   public entries: JournalEntry[] = [];
@@ -22,12 +25,14 @@ class MemoryLedgerStore implements LedgerStore {
     id: randomUUID(),
     currency: 'INR',
     isTreasury: false,
+    ownerPrincipalId: principalId,
     status: 'active',
   };
   public readonly treasury: LedgerAccount = {
     id: randomUUID(),
     currency: 'INR',
     isTreasury: true,
+    ownerPrincipalId: null,
     status: 'active',
   };
 
@@ -160,7 +165,23 @@ describe('posting validation', () => {
 describe('listJournalEntries', () => {
   it('rejects an unknown account', async () => {
     const service = new LedgerPostingService(new MemoryLedgerStore());
-    await expect(service.listJournalEntries(randomUUID())).rejects.toMatchObject({
+    await expect(service.listJournalEntries(randomUUID(), principalId)).rejects.toMatchObject({
+      code: 'ACCOUNT_NOT_FOUND',
+    });
+  });
+
+  it("hides another principal's account behind the same not-found error", async () => {
+    const store = new MemoryLedgerStore();
+    const service = new LedgerPostingService(store);
+    await expect(
+      service.listJournalEntries(store.customer.id, otherPrincipalId),
+    ).rejects.toMatchObject({ code: 'ACCOUNT_NOT_FOUND' });
+  });
+
+  it('never exposes a treasury journal to a customer', async () => {
+    const store = new MemoryLedgerStore();
+    const service = new LedgerPostingService(store);
+    await expect(service.listJournalEntries(store.treasury.id, principalId)).rejects.toMatchObject({
       code: 'ACCOUNT_NOT_FOUND',
     });
   });
@@ -169,7 +190,7 @@ describe('listJournalEntries', () => {
     const store = new MemoryLedgerStore();
     const service = new LedgerPostingService(store);
     await expect(
-      service.listJournalEntries(store.customer.id, { cursor: 'not-base64url-json' }),
+      service.listJournalEntries(store.customer.id, principalId, { cursor: 'not-base64url-json' }),
     ).rejects.toMatchObject({ code: 'INVALID_CURSOR' });
   });
 
@@ -180,7 +201,9 @@ describe('listJournalEntries', () => {
       createdAt: '2026-08-03T00:00:00.000Z',
       id: randomUUID(),
     });
-    await expect(service.listJournalEntries(store.customer.id, { cursor })).resolves.toMatchObject({
+    await expect(
+      service.listJournalEntries(store.customer.id, principalId, { cursor }),
+    ).resolves.toMatchObject({
       entries: [],
       nextCursor: null,
     });
@@ -201,12 +224,14 @@ describe('listJournalEntries', () => {
     }
     const service = new LedgerPostingService(store);
 
-    const defaultLimit = await service.listJournalEntries(store.customer.id);
+    const defaultLimit = await service.listJournalEntries(store.customer.id, principalId);
     expect(defaultLimit.entries.length).toBe(5);
 
-    const tooLarge = await service.listJournalEntries(store.customer.id, { limit: 10_000 });
+    const tooLarge = await service.listJournalEntries(store.customer.id, principalId, {
+      limit: 10_000,
+    });
     expect(tooLarge.entries.length).toBeLessThanOrEqual(5);
-    const tooSmall = await service.listJournalEntries(store.customer.id, { limit: 0 });
+    const tooSmall = await service.listJournalEntries(store.customer.id, principalId, { limit: 0 });
     expect(tooSmall.entries.length).toBeGreaterThan(0); // clamped to the default, not zero
   });
 });

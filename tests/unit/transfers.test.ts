@@ -12,6 +12,8 @@ import { TransferMetrics } from '../../src/modules/transfers/transfer-service.js
 
 const sourceId = '00000000-0000-4000-8000-000000000020';
 const destinationId = '00000000-0000-4000-8000-000000000010';
+const principalId = '00000000-0000-4000-8000-0000000000a1';
+const otherPrincipalId = '00000000-0000-4000-8000-0000000000a2';
 
 function account(
   id: string,
@@ -22,6 +24,7 @@ function account(
     currency: 'INR',
     id,
     isTreasury: false,
+    ownerPrincipalId: principalId,
     status: 'active',
     ...overrides,
   };
@@ -48,7 +51,7 @@ class FakeTransferStore implements TransferStore, TransferTransaction {
   public lockOrders: (readonly [string, string])[] = [];
   public posts = 0;
 
-  public async findById(): Promise<Transfer | null> {
+  public async findVisibleById(): Promise<Transfer | null> {
     return null;
   }
 
@@ -98,10 +101,37 @@ describe('transfer validation', () => {
     const store = new FakeTransferStore();
     const service = new TransferService(store);
     await expectTransferError(
-      service.create({ ...input, destinationAccountId: sourceId }),
+      service.create({ ...input, destinationAccountId: sourceId }, principalId),
       'SELF_TRANSFER',
     );
     expect(store.attempts).toBe(0);
+  });
+
+  it('refuses to spend from an account the caller does not own, and posts nothing', async () => {
+    const store = new FakeTransferStore();
+    store.accounts = [
+      account(sourceId, { ownerPrincipalId: otherPrincipalId }),
+      account(destinationId),
+    ];
+    // Reported as ACCOUNT_NOT_FOUND, not a distinct authorization code: a caller must not be able
+    // to tell "someone else's account" apart from "no such account".
+    await expectTransferError(
+      new TransferService(store).create(input, principalId),
+      'ACCOUNT_NOT_FOUND',
+    );
+    expect(store.posts).toBe(0);
+  });
+
+  it('allows paying an account owned by someone else', async () => {
+    const store = new FakeTransferStore();
+    store.accounts = [
+      account(sourceId),
+      account(destinationId, { ownerPrincipalId: otherPrincipalId }),
+    ];
+    await expect(new TransferService(store).create(input, principalId)).resolves.toMatchObject({
+      status: 'completed',
+    });
+    expect(store.posts).toBe(1);
   });
 
   it('rejects inactive, cross-currency, and underfunded sources without posting', async () => {
@@ -123,7 +153,10 @@ describe('transfer validation', () => {
     for (const testCase of cases) {
       const store = new FakeTransferStore();
       store.accounts = testCase.accounts;
-      await expectTransferError(new TransferService(store).create(input), testCase.code);
+      await expectTransferError(
+        new TransferService(store).create(input, principalId),
+        testCase.code,
+      );
       expect(store.posts).toBe(0);
     }
   });
@@ -150,7 +183,9 @@ describe('serialization retries', () => {
       },
     });
 
-    await expect(service.create(input)).resolves.toMatchObject({ status: 'completed' });
+    await expect(service.create(input, principalId)).resolves.toMatchObject({
+      status: 'completed',
+    });
     expect(store.attempts).toBe(3);
     expect(delays).toEqual([10, 20]);
     expect(retryEvents).toEqual([1, 2]);
@@ -172,7 +207,7 @@ describe('serialization retries', () => {
       },
     });
 
-    await expectTransferError(service.create(input), 'TRANSFER_RETRY_EXHAUSTED');
+    await expectTransferError(service.create(input, principalId), 'TRANSFER_RETRY_EXHAUSTED');
     expect(store.attempts).toBe(4);
     expect(delays).toEqual([10, 20, 40]);
     expect(delays.reduce((total, delay) => total + delay, 0)).toBe(70);

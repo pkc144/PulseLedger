@@ -24,6 +24,7 @@ export class IdempotencyService implements IdempotencyApplication {
   public async claimOrReplay(
     key: string,
     operation: string,
+    principalId: string,
     requestBody: unknown,
   ): Promise<StoredIdempotentResponse | null> {
     const fingerprint = computeCanonicalFingerprint(requestBody);
@@ -32,6 +33,7 @@ export class IdempotencyService implements IdempotencyApplication {
       fingerprint,
       key,
       operation,
+      principalId,
       staleTimeoutMs: this.staleTimeoutMs,
     });
 

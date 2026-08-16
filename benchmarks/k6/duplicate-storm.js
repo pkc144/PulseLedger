@@ -10,7 +10,13 @@
 // many callers raced it.
 import http from 'k6/http';
 import { check } from 'k6';
-import { fundAccount, createAccount, getMetrics, transfer } from './helpers.js';
+import {
+  createAccount,
+  fundAccount,
+  getMetrics,
+  provisionCustomerKey,
+  transfer,
+} from './helpers.js';
 
 const DUPLICATE_COUNT = Number(__ENV.DUPLICATE_COUNT || 50);
 
@@ -34,16 +40,17 @@ export const options = {
 };
 
 export function setup() {
-  const source = createAccount('INR');
+  const apiKey = provisionCustomerKey('duplicate-storm');
+  const source = createAccount('INR', apiKey);
   fundAccount(source, '1000000');
-  const destination = createAccount('INR');
+  const destination = createAccount('INR', apiKey);
   const idempotencyKey = `duplicate-storm-${Date.now()}`;
   const before = getMetrics();
-  return { source, destination, idempotencyKey, before };
+  return { source, destination, idempotencyKey, apiKey, before };
 }
 
 export default function (data) {
-  const res = transfer(data.source, data.destination, '777', data.idempotencyKey);
+  const res = transfer(data.source, data.destination, '777', data.idempotencyKey, data.apiKey);
   check(res, {
     'got 201 (won the race) or 409 (correctly rejected)': (r) =>
       r.status === 201 || r.status === 409,

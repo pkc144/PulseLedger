@@ -39,6 +39,8 @@ export interface LockedTransferAccount {
   currency: string;
   id: string;
   isTreasury: boolean;
+  /** Null for treasuries. Read from the locked row so ownership cannot be raced. */
+  ownerPrincipalId: string | null;
   status: 'active' | 'frozen' | 'closed';
 }
 
@@ -49,7 +51,7 @@ export interface PostTransferInput {
   id: string;
   reference: string;
   sourceAccountId: string;
-  idempotency?: { key: string; operation: string } | undefined;
+  idempotency?: { key: string; operation: string; principalId: string } | undefined;
 }
 
 export interface TransferTransaction {
@@ -58,7 +60,7 @@ export interface TransferTransaction {
 }
 
 export interface TransferStore {
-  findById(id: string): Promise<Transfer | null>;
+  findVisibleById(id: string, principalId: string): Promise<Transfer | null>;
   runSerializable<T>(work: (transaction: TransferTransaction) => Promise<T>): Promise<T>;
 }
 
@@ -67,8 +69,17 @@ export interface CreateTransferOptions {
 }
 
 export interface TransferApplication {
-  create(input: CreateTransferInput, options?: CreateTransferOptions): Promise<Transfer>;
-  findById(id: string): Promise<Transfer>;
+  /**
+   * `principalId` must own the source account; the destination may belong to anyone. Both are
+   * validated against rows locked inside the transaction, never against an earlier read.
+   */
+  create(
+    input: CreateTransferInput,
+    principalId: string,
+    options?: CreateTransferOptions,
+  ): Promise<Transfer>;
+  /** Readable by either participant's owner; anyone else gets `TRANSFER_NOT_FOUND`. */
+  findById(id: string, principalId: string): Promise<Transfer>;
 }
 
 export interface TransferTelemetry {

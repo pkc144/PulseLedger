@@ -5,12 +5,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../../src/app.js';
 import { createPool } from '../../src/infrastructure/database/pool.js';
 import { runMigrations } from '../../src/infrastructure/database/migrate.js';
+import { createTestPrincipal, type TestPrincipal } from '../helpers/auth.js';
 
 const testAdminApiKey = 'test-admin-api-key-0123456789';
 
 let container: StartedPostgreSqlContainer | undefined;
 let pool: pg.Pool;
 let app: Awaited<ReturnType<typeof buildApp>>;
+let principal: TestPrincipal;
 
 beforeAll(async () => {
   let databaseUrl = process.env.TEST_DATABASE_URL;
@@ -26,6 +28,7 @@ beforeAll(async () => {
   pool = createPool(databaseUrl);
   await runMigrations(pool);
   app = await buildApp({ adminApiKey: testAdminApiKey, database: pool });
+  principal = await createTestPrincipal(pool, 'integration');
 });
 
 afterAll(async () => {
@@ -38,6 +41,7 @@ async function createAccount(currency: 'INR' | 'USD' = 'INR'): Promise<string> {
   const response = await app.inject({
     method: 'POST',
     url: '/v1/accounts',
+    headers: { ...principal.authHeaders },
     payload: { currency },
   });
   expect(response.statusCode).toBe(201);
@@ -56,7 +60,11 @@ async function fund(accountId: string, amountMinor: string): Promise<string> {
 }
 
 async function balance(accountId: string): Promise<string> {
-  const response = await app.inject({ method: 'GET', url: `/v1/accounts/${accountId}` });
+  const response = await app.inject({
+    method: 'GET',
+    url: `/v1/accounts/${accountId}`,
+    headers: { ...principal.authHeaders },
+  });
   expect(response.statusCode).toBe(200);
   return response.json<{ balanceMinor: string }>().balanceMinor;
 }
@@ -69,6 +77,7 @@ async function transfer(
   return await app.inject({
     method: 'POST',
     url: '/v1/transfers',
+    headers: { ...principal.authHeaders },
     payload: { sourceAccountId, destinationAccountId, amountMinor },
   });
 }
@@ -128,7 +137,11 @@ describe('serializable transfers with PostgreSQL', () => {
     expect(response.statusCode).toBe(201);
     const created = response.json<{ id: string }>();
 
-    const fetched = await app.inject({ method: 'GET', url: `/v1/transfers/${created.id}` });
+    const fetched = await app.inject({
+      method: 'GET',
+      url: `/v1/transfers/${created.id}`,
+      headers: { ...principal.authHeaders },
+    });
     expect(fetched.statusCode).toBe(200);
     expect(fetched.json()).toEqual(response.json());
     expect(app.transferMetrics.snapshot().completed).toBe(completedBefore + 1);
@@ -236,7 +249,11 @@ describe('serializable transfers with PostgreSQL', () => {
   });
 
   it('returns not found for an unknown transfer', async () => {
-    const response = await app.inject({ method: 'GET', url: `/v1/transfers/${randomUUID()}` });
+    const response = await app.inject({
+      method: 'GET',
+      url: `/v1/transfers/${randomUUID()}`,
+      headers: { ...principal.authHeaders },
+    });
     expect(response.statusCode).toBe(404);
     expect(response.json()).toMatchObject({ error: { code: 'TRANSFER_NOT_FOUND' } });
   });

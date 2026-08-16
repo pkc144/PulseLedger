@@ -1,10 +1,18 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { AppError } from '../../errors.js';
 import type { IdempotencyApplication } from '../idempotency/idempotency-domain.js';
 import type { CreateTransferInput, TransferApplication } from './transfer-domain.js';
 
 interface TransferRouteOptions {
   idempotency: IdempotencyApplication;
   service: TransferApplication;
+}
+
+/** See the note on the identical helper in account-routes.ts. */
+function principalOf(request: { principalId?: string }): string {
+  const principalId = request.principalId;
+  if (!principalId) throw new AppError('UNAUTHORIZED', 401, 'Authentication required');
+  return principalId;
 }
 
 const transferResponseSchema = {
@@ -51,6 +59,7 @@ export const transferRoutes: FastifyPluginAsync<TransferRouteOptions> = async (a
       },
     },
     async (request, reply) => {
+      const principalId = principalOf(request);
       const idempotencyKey = request.headers['idempotency-key'];
       const key =
         typeof idempotencyKey === 'string' && idempotencyKey.length > 0
@@ -58,13 +67,22 @@ export const transferRoutes: FastifyPluginAsync<TransferRouteOptions> = async (a
           : undefined;
 
       if (key) {
-        const replay = await options.idempotency.claimOrReplay(key, 'transfer', request.body);
+        // Keys are namespaced by principal in storage, so two callers may pick the same string
+        // without colliding and neither can replay the other's stored response.
+        const replay = await options.idempotency.claimOrReplay(
+          key,
+          'transfer',
+          principalId,
+          request.body,
+        );
         if (replay) {
           return reply.status(replay.status).send(replay.body);
         }
       }
 
-      const transfer = await options.service.create(request.body, { idempotencyKey: key });
+      const transfer = await options.service.create(request.body, principalId, {
+        idempotencyKey: key,
+      });
       return reply.status(201).send(transfer);
     },
   );
@@ -82,6 +100,6 @@ export const transferRoutes: FastifyPluginAsync<TransferRouteOptions> = async (a
         response: { 200: transferResponseSchema },
       },
     },
-    async (request) => await options.service.findById(request.params.id),
+    async (request) => await options.service.findById(request.params.id, principalOf(request)),
   );
 };

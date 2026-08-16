@@ -64,8 +64,9 @@ stop_server() {
 cleanup() { stop_server KILL; }
 trap cleanup EXIT
 
-post() { curl -s -X POST "$@"; }
 admin() { curl -s -H "x-admin-api-key: $ADMIN_API_KEY" "$@"; }
+# Customer routes need a customer credential; the admin key does not open them.
+customer() { curl -s -H "authorization: Bearer $CUSTOMER_KEY" "$@"; }
 
 # ---------------------------------------------------------------------------
 bold "0. Start the server (outbox poll interval ${SLOW_POLL_MS} ms)"
@@ -73,9 +74,16 @@ start_server "$SLOW_POLL_MS"
 note "ready: $(curl -s "$BASE/health/ready")"
 
 # ---------------------------------------------------------------------------
-bold "1. Two accounts, one funded, one transfer  [invariant 1: debits == credits]"
-ALICE=$(post "$BASE/v1/accounts" -H 'content-type: application/json' -d '{"currency":"INR"}' | json id)
-BOB=$(post "$BASE/v1/accounts" -H 'content-type: application/json' -d '{"currency":"INR"}' | json id)
+bold "1. A principal, its API key, two accounts, one transfer  [invariant 1: debits == credits]"
+PRINCIPAL=$(admin -X POST "$BASE/v1/admin/principals" -H 'content-type: application/json' \
+  -d '{"name":"demo"}' | json id)
+CUSTOMER_KEY=$(admin -X POST "$BASE/v1/admin/principals/$PRINCIPAL/api-keys" | json key)
+note "principal=$PRINCIPAL"
+note "api key=${CUSTOMER_KEY:0:20}...  (shown once; only its SHA-256 hash is stored)"
+note "unauthenticated POST /v1/transfers -> HTTP $(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/v1/transfers" -H 'content-type: application/json' -d '{}')"
+
+ALICE=$(customer -X POST "$BASE/v1/accounts" -H 'content-type: application/json' -d '{"currency":"INR"}' | json id)
+BOB=$(customer -X POST "$BASE/v1/accounts" -H 'content-type: application/json' -d '{"currency":"INR"}' | json id)
 note "alice=$ALICE"
 note "bob=$BOB"
 
@@ -83,12 +91,12 @@ admin -X POST "$BASE/v1/admin/fund" -H 'content-type: application/json' \
   -d "{\"accountId\":\"$ALICE\",\"amountMinor\":\"250000\"}" >/dev/null
 note "funded alice with 250000 minor units from the INR treasury"
 
-TRANSFER=$(post "$BASE/v1/transfers" -H 'content-type: application/json' \
+TRANSFER=$(customer -X POST "$BASE/v1/transfers" -H 'content-type: application/json' \
   -H "idempotency-key: demo-transfer-$$" \
   -d "{\"sourceAccountId\":\"$ALICE\",\"destinationAccountId\":\"$BOB\",\"amountMinor\":\"75000\"}")
 note "transfer: $(echo "$TRANSFER" | json id) amount=$(echo "$TRANSFER" | json amountMinor)"
-note "alice balance: $(curl -s "$BASE/v1/accounts/$ALICE" | json balanceMinor)"
-note "bob   balance: $(curl -s "$BASE/v1/accounts/$BOB" | json balanceMinor)"
+note "alice balance: $(customer "$BASE/v1/accounts/$ALICE" | json balanceMinor)"
+note "bob   balance: $(customer "$BASE/v1/accounts/$BOB" | json balanceMinor)"
 note "journal debits == credits for that transaction: $(sql "SELECT sum(CASE WHEN direction='debit' THEN amount_minor ELSE -amount_minor END) = 0 FROM journal_entries WHERE transaction_id = '$(echo "$TRANSFER" | json id)'")"
 
 # ---------------------------------------------------------------------------
@@ -99,7 +107,8 @@ RESULTS="$(mktemp -d -t pulseledger-storm)"
 storm_pids=()
 for i in $(seq 1 50); do
   curl -s -o /dev/null -w '%{http_code}\n' -X POST "$BASE/v1/transfers" \
-    -H 'content-type: application/json' -H "idempotency-key: $KEY" \
+    -H 'content-type: application/json' -H "authorization: Bearer $CUSTOMER_KEY" \
+    -H "idempotency-key: $KEY" \
     -d "{\"sourceAccountId\":\"$ALICE\",\"destinationAccountId\":\"$BOB\",\"amountMinor\":\"1000\"}" \
     >"$RESULTS/$i" &
   storm_pids+=("$!")
@@ -114,8 +123,23 @@ note "rows in transfers for that amount: $(sql "SELECT count(*) FROM transfers W
 rm -rf "$RESULTS"
 
 # ---------------------------------------------------------------------------
+bold "2b. Another principal cannot touch those accounts  [ownership]"
+INTRUDER=$(admin -X POST "$BASE/v1/admin/principals" -H 'content-type: application/json' \
+  -d '{"name":"intruder"}' | json id)
+INTRUDER_KEY=$(admin -X POST "$BASE/v1/admin/principals/$INTRUDER/api-keys" | json key)
+note "read alice's account      -> HTTP $(curl -s -o /dev/null -w '%{http_code}' -H "authorization: Bearer $INTRUDER_KEY" "$BASE/v1/accounts/$ALICE")  (404: not 403, so it leaks nothing)"
+note "read alice's entries      -> HTTP $(curl -s -o /dev/null -w '%{http_code}' -H "authorization: Bearer $INTRUDER_KEY" "$BASE/v1/accounts/$ALICE/entries")"
+# Built here rather than inline: inside "$( ... )" bash brace-expands a literal {a,b} into two
+# arguments, which would send a malformed body and prove nothing about authorization.
+INTRUDER_PAYLOAD="{\"sourceAccountId\":\"$ALICE\",\"destinationAccountId\":\"$BOB\",\"amountMinor\":\"1000\"}"
+INTRUDER_SPEND=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/v1/transfers" \
+  -H 'content-type: application/json' -H "authorization: Bearer $INTRUDER_KEY" -d "$INTRUDER_PAYLOAD")
+note "spend from alice's account-> HTTP $INTRUDER_SPEND"
+note "alice balance unchanged:   $(customer "$BASE/v1/accounts/$ALICE" | json balanceMinor)"
+
+# ---------------------------------------------------------------------------
 bold "3. Kill the process mid-flight, restart  [invariant 4: at-least-once delivery, one effect]"
-CRASH_TRANSFER=$(post "$BASE/v1/transfers" -H 'content-type: application/json' \
+CRASH_TRANSFER=$(customer -X POST "$BASE/v1/transfers" -H 'content-type: application/json' \
   -d "{\"sourceAccountId\":\"$ALICE\",\"destinationAccountId\":\"$BOB\",\"amountMinor\":\"500\"}" | json id)
 stop_server KILL
 note "SIGKILLed the process (no graceful shutdown) right after the transfer committed"
