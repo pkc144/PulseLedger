@@ -28,12 +28,19 @@ named test that proves it.
 | `npx vitest run -t 'never lets two workers double-claim'`     | One test by name                    | yes              |
 
 Integration tests use `TEST_DATABASE_URL` when it is set; otherwise
-[Testcontainers](https://testcontainers.com/) starts an isolated `postgres:17-alpine` container per
-run, so `docker compose up -d postgres` is optional for tests but required for the app.
+[Testcontainers](https://testcontainers.com/) starts an isolated `postgres:17-alpine` container **per
+test file**, so `docker compose up -d postgres` is optional for tests but required for the app.
+
+> **`TEST_DATABASE_URL` is for one file at a time, not the whole suite.** Each integration file
+> assumes it owns its database — it runs the migrations itself and reads back rows it created. Point
+> the whole suite at one shared database and the files run in parallel against it, producing DDL
+> deadlocks and cross-file interference that look like product failures but are not. That is why CI
+> deliberately leaves the variable unset.
 
 ```bash
-# Against the compose database instead of Testcontainers (faster on repeat runs):
-TEST_DATABASE_URL=postgresql://pulseledger:pulseledger@localhost:5432/pulseledger npm run test:integration
+# One file against the compose database (skips container startup for a quick edit-run loop):
+TEST_DATABASE_URL=postgresql://pulseledger:pulseledger@localhost:5432/pulseledger \
+  npx vitest run tests/integration/outbox.integration.test.ts
 ```
 
 Node 22 or newer is required (`.nvmrc` pins it). On Node 20 the Testcontainers setup fails before the
@@ -86,6 +93,10 @@ Raw k6 stdout and `--summary-export` JSON per scenario are committed under
 
 `.github/workflows/ci.yml` runs on every push and pull request against a real PostgreSQL 17 service
 container: `npm ci` → architecture check → format check → lint → typecheck → migrate → test → build.
+
+The service container backs the `db:migrate` step, which proves the migrations apply to an empty
+database. The tests themselves get their own per-file databases from Testcontainers, so CI runs the
+same suite as a local `npm test` rather than a differently-isolated variant of it.
 
 ## Test inventory
 

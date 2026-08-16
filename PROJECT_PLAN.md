@@ -539,7 +539,7 @@ PulseLedger v1 is finished only when all of the following are true. Evidence for
 - [x] Worker recovery creates one logical audit effect.
 - [x] Reconciliation detects intentional corruption.
 - [x] All retry policies are bounded and observable.
-- [x] CI passes linting, type checks, tests, migrations, and build.
+- [ ] CI passes linting, type checks, tests, migrations, and build. Red on the tagged commit: CI shared one database across parallel integration files. Configuration fixed after tagging; see [docs/release/v1.0.0.md](./docs/release/v1.0.0.md#ci-status).
 - [x] Benchmarks are reproducible and contain no invented metrics.
 - [x] Architecture documentation matches the code.
 - [x] Four ADRs are complete.

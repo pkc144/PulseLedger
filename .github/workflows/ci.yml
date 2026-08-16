@@ -27,8 +27,14 @@ jobs:
           --health-retries 10
 
     env:
+      # Used by the db:migrate step below, which proves migrations apply cleanly to an empty
+      # database. Deliberately NOT exported as TEST_DATABASE_URL: every integration test file
+      # owns its own database (see the `withDatabase(...)` name each one declares), and pointing
+      # them all at one shared database made them run migrations concurrently and read each
+      # other's rows -- deadlocks and cross-file interference, not real defects. With the variable
+      # unset, Testcontainers gives each file an isolated PostgreSQL, exactly as it does locally,
+      # so CI runs the same suite a developer runs.
       DATABASE_URL: postgresql://pulseledger:pulseledger@localhost:5432/pulseledger_test
-      TEST_DATABASE_URL: postgresql://pulseledger:pulseledger@localhost:5432/pulseledger_test
       NODE_ENV: test
       LOG_LEVEL: silent
       ADMIN_API_KEY: ci-admin-api-key-0123456789
