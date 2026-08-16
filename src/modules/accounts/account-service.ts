@@ -8,11 +8,11 @@ import type {
 export class AccountService implements AccountApplication {
   public constructor(private readonly store: AccountStore) {}
 
-  public async create(input: CreateAccountInput): Promise<Account> {
-    return await this.store.create(input);
+  public async create(input: CreateAccountInput, ownerPrincipalId: string): Promise<Account> {
+    return await this.store.create(input, ownerPrincipalId);
   }
 
-  public async findById(id: string): Promise<Account | null> {
-    return await this.store.findById(id);
+  public async findOwnedById(id: string, ownerPrincipalId: string): Promise<Account | null> {
+    return await this.store.findOwnedById(id, ownerPrincipalId);
   }
 }

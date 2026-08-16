@@ -13,12 +13,17 @@ export interface CreateAccountInput {
   currency: SupportedCurrency;
 }
 
+/**
+ * Every operation is scoped to the principal that owns the account. Lookups filter by owner in
+ * SQL rather than fetching and comparing, so a caller can never read an account it does not own
+ * even for the moment between load and check.
+ */
 export interface AccountStore {
-  create(input: CreateAccountInput): Promise<Account>;
-  findById(id: string): Promise<Account | null>;
+  create(input: CreateAccountInput, ownerPrincipalId: string): Promise<Account>;
+  findOwnedById(id: string, ownerPrincipalId: string): Promise<Account | null>;
 }
 
 export interface AccountApplication {
-  create(input: CreateAccountInput): Promise<Account>;
-  findById(id: string): Promise<Account | null>;
+  create(input: CreateAccountInput, ownerPrincipalId: string): Promise<Account>;
+  findOwnedById(id: string, ownerPrincipalId: string): Promise<Account | null>;
 }

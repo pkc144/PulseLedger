@@ -15,6 +15,7 @@ interface AccountRow extends Record<string, unknown> {
   currency: string;
   id: string;
   is_treasury: boolean;
+  owner_principal_id: string | null;
   status: LedgerAccount['status'];
 }
 
@@ -46,6 +47,7 @@ function toAccount(row: AccountRow): LedgerAccount {
     currency: row.currency,
     id: row.id,
     isTreasury: row.is_treasury,
+    ownerPrincipalId: row.owner_principal_id,
     status: row.status,
   };
 }
@@ -67,7 +69,7 @@ export class PostgresLedgerStore implements LedgerStore {
 
   public async findAccount(id: string): Promise<LedgerAccount | null> {
     const result = await this.database.query<AccountRow>(
-      `SELECT id, currency, status, is_treasury
+      `SELECT id, currency, status, is_treasury, owner_principal_id
        FROM accounts
        WHERE id = $1`,
       [id],
@@ -78,7 +80,7 @@ export class PostgresLedgerStore implements LedgerStore {
 
   public async findTreasury(currency: string): Promise<LedgerAccount | null> {
     const result = await this.database.query<AccountRow>(
-      `SELECT id, currency, status, is_treasury
+      `SELECT id, currency, status, is_treasury, owner_principal_id
        FROM accounts
        WHERE currency = $1 AND is_treasury = true`,
       [currency],

@@ -37,21 +37,28 @@ export interface IdempotencyStore {
     fingerprint: string;
     key: string;
     operation: string;
+    principalId: string;
     staleTimeoutMs: number;
   }): Promise<ClaimResult>;
 
   complete(params: {
     key: string;
     operation: string;
+    principalId: string;
     responseBody: unknown;
     responseStatus: number;
   }): Promise<void>;
 }
 
 export interface IdempotencyApplication {
+  /**
+   * Keys are scoped to the principal that sent them: two callers may both choose "order-42"
+   * without colliding, and one caller can never replay another's stored response.
+   */
   claimOrReplay(
     key: string,
     operation: string,
+    principalId: string,
     requestBody: unknown,
   ): Promise<StoredIdempotentResponse | null>;
 }

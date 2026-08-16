@@ -20,7 +20,10 @@ this page is the summary and the list of things those ADRs consciously left on t
 | Worker in the same process as the API                       | One deployable, one dependency, trivially reproducible locally and in CI             | API and worker scale together; a process crash pauses both                                                     |
 | Postgres polling instead of a broker                        | No new infrastructure; durability, ordering and safe claiming come from the database | Poll latency (default 1 s) and no fan-out to other systems                                                     |
 | Invariants enforced in SQL, not only in TypeScript          | A defect or a raw `psql` session still cannot commit invalid financial state         | Some rules are asserted twice, and constraint errors are less expressive than domain errors                    |
-| Static admin API key for `/v1/admin/*`                      | Demo-grade protection with a constant-time comparison and no new dependency          | Not a real authn/authz story: no users, roles, rotation, or per-caller audit                                   |
+| Static admin API key for `/v1/admin/*`                      | Demo-grade protection with a constant-time comparison and no new dependency          | Not a real admin authn story: no operators, roles, rotation, or per-caller audit                               |
+| API keys hashed with SHA-256, not argon2/bcrypt             | Correct for 256-bit random secrets, and cheap on the request path of a ledger        | Would be the wrong choice the moment a human-chosen password enters the system                                 |
+| Ownership enforced in PostgreSQL, not just in handlers      | A defect or a raw SQL session still cannot create an unowned account or reassign one | An account can never change hands; moving a balance means a new account and a journaled posting                |
+| Unauthorized resources answer `404`, never `403`            | The API cannot be used to enumerate account or transfer IDs                          | A caller with a genuine typo gets the same answer as an intruder, which is harder to debug                     |
 
 ## Known limitations of v1
 
@@ -28,11 +31,18 @@ These are real gaps, listed so nobody has to discover them by surprise.
 
 **Security and access control**
 
-- Customer-facing routes (`/v1/accounts`, `/v1/transfers`) are **unauthenticated**. The project's
-  subject is ledger correctness; anyone deploying this would put real authentication in front.
-- One shared static admin key, no rotation and no per-caller identity.
-- No rate limiting. The bounded body size, connection, keep-alive, and request timeouts are the only
-  request-level protection.
+- API keys have **no scopes and no expiry**. A key can do everything its principal can do, until it
+  is revoked. There is no read-only key, and no automatic rotation.
+- Keys are not usage-tracked: there is deliberately no `last_used_at`, because writing it would add
+  a database write to every authenticated request. Finding unused keys therefore needs application
+  logs.
+- The administrative credential is still **one shared static key** — no operator identity, no
+  rotation, no per-caller audit trail for who funded or reconciled what.
+- Principals can be disabled (`status = 'disabled'`, honored on every request) but there is no API
+  for it; it is a SQL update.
+- No rate limiting, and no protection against a leaked key being used from anywhere. The bounded
+  body size, connection, keep-alive, and request timeouts are the only other request-level controls.
+- TLS is out of scope: keys travel in plaintext unless something terminates HTTPS in front.
 
 **Operational**
 
@@ -49,6 +59,8 @@ These are real gaps, listed so nobody has to discover them by surprise.
 **Domain**
 
 - Two demo currencies (`INR`, `USD`) and no FX: cross-currency transfers are rejected, not converted.
+- An account belongs to exactly one principal forever. There is no shared or delegated access, no
+  sub-account hierarchy, and no way to transfer ownership.
 - No transfer reversal, cancellation, or scheduling API. A correction means posting a new transaction
   by hand.
 - No account lifecycle API: `frozen` and `closed` are enforced everywhere but nothing sets them.

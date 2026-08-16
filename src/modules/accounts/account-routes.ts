@@ -13,6 +13,17 @@ interface AccountRouteOptions {
   service: AccountApplication;
 }
 
+/**
+ * The customer guard (wired at the composition root) sets `principalId` before any handler runs,
+ * so this only fails if these routes are ever registered outside it — a wiring mistake that
+ * should surface as a refusal to serve, not as an unauthenticated read.
+ */
+function principalOf(request: { principalId?: string }): string {
+  const principalId = request.principalId;
+  if (!principalId) throw new AppError('UNAUTHORIZED', 401, 'Authentication required');
+  return principalId;
+}
+
 const journalEntriesResponseSchema = {
   type: 'object',
   additionalProperties: false,
@@ -66,7 +77,10 @@ export const accountRoutes: FastifyPluginAsync<AccountRouteOptions> = async (app
       },
     },
     async (request, reply) => {
-      const account = await options.service.create({ currency: request.body.currency });
+      const account = await options.service.create(
+        { currency: request.body.currency },
+        principalOf(request),
+      );
       return reply.status(201).send(account);
     },
   );
@@ -85,7 +99,7 @@ export const accountRoutes: FastifyPluginAsync<AccountRouteOptions> = async (app
       },
     },
     async (request) => {
-      const account = await options.service.findById(request.params.id);
+      const account = await options.service.findOwnedById(request.params.id, principalOf(request));
       if (!account) throw new AppError('ACCOUNT_NOT_FOUND', 404, 'Account not found');
       return account;
     },
@@ -113,7 +127,7 @@ export const accountRoutes: FastifyPluginAsync<AccountRouteOptions> = async (app
       },
     },
     async (request) => {
-      return await options.ledger.listJournalEntries(request.params.id, {
+      return await options.ledger.listJournalEntries(request.params.id, principalOf(request), {
         ...(request.query.cursor !== undefined ? { cursor: request.query.cursor } : {}),
         ...(request.query.limit !== undefined ? { limit: request.query.limit } : {}),
       });

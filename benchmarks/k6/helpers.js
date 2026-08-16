@@ -8,12 +8,40 @@ if (!ADMIN_API_KEY) {
   throw new Error('ADMIN_API_KEY environment variable is required to run any k6 scenario');
 }
 
-const jsonHeaders = { 'Content-Type': 'application/json' };
 const adminHeaders = { 'Content-Type': 'application/json', 'x-admin-api-key': ADMIN_API_KEY };
 
-export function createAccount(currency) {
+/** Customer routes need a customer credential; the admin key cannot stand in for one. */
+function customerHeaders(apiKey) {
+  return { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` };
+}
+
+/**
+ * Mints a throwaway principal and API key for one scenario run. Call this in `setup()` and pass
+ * the returned secret to every VU through the setup data -- module state does not cross into VUs.
+ */
+export function provisionCustomerKey(label) {
+  const principal = http.post(
+    `${BASE_URL}/v1/admin/principals`,
+    JSON.stringify({ name: `k6-${label}-${Date.now()}` }),
+    { headers: adminHeaders },
+  );
+  check(principal, { 'principal created (201)': (r) => r.status === 201 });
+
+  // No body, and therefore no Content-Type: Fastify rejects an empty body that claims to be JSON.
+  const issued = http.post(
+    `${BASE_URL}/v1/admin/principals/${principal.json('id')}/api-keys`,
+    null,
+    {
+      headers: { 'x-admin-api-key': ADMIN_API_KEY },
+    },
+  );
+  check(issued, { 'api key issued (201)': (r) => r.status === 201 });
+  return issued.json('key');
+}
+
+export function createAccount(currency, apiKey) {
   const res = http.post(`${BASE_URL}/v1/accounts`, JSON.stringify({ currency }), {
-    headers: jsonHeaders,
+    headers: customerHeaders(apiKey),
   });
   check(res, { 'account created (201)': (r) => r.status === 201 });
   return res.json('id');
@@ -27,8 +55,14 @@ export function fundAccount(accountId, amountMinor) {
   return res;
 }
 
-export function transfer(sourceAccountId, destinationAccountId, amountMinor, idempotencyKey) {
-  const headers = Object.assign({}, jsonHeaders);
+export function transfer(
+  sourceAccountId,
+  destinationAccountId,
+  amountMinor,
+  idempotencyKey,
+  apiKey,
+) {
+  const headers = customerHeaders(apiKey);
   if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
   return http.post(
     `${BASE_URL}/v1/transfers`,
@@ -37,8 +71,8 @@ export function transfer(sourceAccountId, destinationAccountId, amountMinor, ide
   );
 }
 
-export function getAccount(accountId) {
-  return http.get(`${BASE_URL}/v1/accounts/${accountId}`);
+export function getAccount(accountId, apiKey) {
+  return http.get(`${BASE_URL}/v1/accounts/${accountId}`, { headers: customerHeaders(apiKey) });
 }
 
 export function getMetrics() {
@@ -47,10 +81,10 @@ export function getMetrics() {
   return res.json('transfers');
 }
 
-export function buildAccountPool(size, currency, fundingAmountMinor) {
+export function buildAccountPool(size, currency, fundingAmountMinor, apiKey) {
   const accounts = [];
   for (let i = 0; i < size; i += 1) {
-    const id = createAccount(currency);
+    const id = createAccount(currency, apiKey);
     fundAccount(id, fundingAmountMinor);
     accounts.push(id);
   }

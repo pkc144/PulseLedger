@@ -4,7 +4,14 @@
 // a failure of the system -- the threshold below only requires latency to stay bounded, and
 // teardown independently re-checks every hot account's balance is still non-negative over HTTP.
 import { check, sleep } from 'k6';
-import { buildAccountPool, getAccount, getMetrics, pickTwoDistinct, transfer } from './helpers.js';
+import {
+  buildAccountPool,
+  getAccount,
+  getMetrics,
+  pickTwoDistinct,
+  provisionCustomerKey,
+  transfer,
+} from './helpers.js';
 
 const HOT_ACCOUNT_COUNT = Number(__ENV.HOT_ACCOUNT_COUNT || 3);
 const VUS = Number(__ENV.VUS || 30);
@@ -24,15 +31,16 @@ export const options = {
 };
 
 export function setup() {
-  const accounts = buildAccountPool(HOT_ACCOUNT_COUNT, 'INR', '100000000');
+  const apiKey = provisionCustomerKey('hot-account-contention');
+  const accounts = buildAccountPool(HOT_ACCOUNT_COUNT, 'INR', '100000000', apiKey);
   const before = getMetrics();
-  return { accounts, before };
+  return { accounts, apiKey, before };
 }
 
 export default function (data) {
   const [source, destination] = pickTwoDistinct(data.accounts);
   const idempotencyKey = `hot-account-${__VU}-${__ITER}-${Date.now()}-${Math.random()}`;
-  const res = transfer(source, destination, '10', idempotencyKey);
+  const res = transfer(source, destination, '10', idempotencyKey, data.apiKey);
   check(res, {
     'transfer succeeded or bounded-retry-exhausted': (r) => r.status === 201 || r.status === 503,
   });
@@ -48,7 +56,7 @@ export function teardown(data) {
   );
 
   for (const accountId of data.accounts) {
-    const res = getAccount(accountId);
+    const res = getAccount(accountId, data.apiKey);
     const balance = res.json('balanceMinor');
     console.log(`[hot-account-contention] final balance ${accountId} = ${balance}`);
     if (BigInt(balance) < 0n) {

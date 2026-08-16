@@ -3,6 +3,7 @@
 import { check, sleep } from 'k6';
 import {
   buildAccountPool,
+  provisionCustomerKey,
   getMetrics,
   pickTwoDistinct,
   randomAmount,
@@ -31,15 +32,16 @@ export const options = {
 };
 
 export function setup() {
-  const accounts = buildAccountPool(ACCOUNT_POOL_SIZE, 'INR', '10000000');
+  const apiKey = provisionCustomerKey('broad-concurrency');
+  const accounts = buildAccountPool(ACCOUNT_POOL_SIZE, 'INR', '10000000', apiKey);
   const before = getMetrics();
-  return { accounts, before };
+  return { accounts, apiKey, before };
 }
 
 export default function (data) {
   const [source, destination] = pickTwoDistinct(data.accounts);
   const idempotencyKey = `broad-concurrency-${__VU}-${__ITER}-${Date.now()}-${Math.random()}`;
-  const res = transfer(source, destination, randomAmount(1, 50), idempotencyKey);
+  const res = transfer(source, destination, randomAmount(1, 50), idempotencyKey, data.apiKey);
   check(res, {
     'transfer succeeded or bounded-retry-exhausted': (r) => r.status === 201 || r.status === 503,
   });

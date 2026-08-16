@@ -64,10 +64,13 @@ export class LedgerPostingService implements LedgerApplication {
 
   public async listJournalEntries(
     accountId: string,
+    ownerPrincipalId: string,
     options: ListJournalEntriesOptions = {},
   ): Promise<ListJournalEntriesResult> {
     const account = await this.store.findAccount(accountId);
-    if (!account) {
+    // An account owned by someone else, or a treasury, is reported exactly like one that does not
+    // exist: the journal is the most sensitive read in the system and must not confirm existence.
+    if (!account || account.isTreasury || account.ownerPrincipalId !== ownerPrincipalId) {
       throw new LedgerError('ACCOUNT_NOT_FOUND', 'Account not found');
     }
 

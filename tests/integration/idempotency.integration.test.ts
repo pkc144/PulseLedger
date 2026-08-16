@@ -5,12 +5,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../../src/app.js';
 import { createPool } from '../../src/infrastructure/database/pool.js';
 import { runMigrations } from '../../src/infrastructure/database/migrate.js';
+import { createTestPrincipal, type TestPrincipal } from '../helpers/auth.js';
 
 const testAdminApiKey = 'test-admin-api-key-0123456789';
 
 let container: StartedPostgreSqlContainer | undefined;
 let pool: pg.Pool;
 let app: Awaited<ReturnType<typeof buildApp>>;
+let principal: TestPrincipal;
 
 beforeAll(async () => {
   let databaseUrl = process.env.TEST_DATABASE_URL;
@@ -26,6 +28,7 @@ beforeAll(async () => {
   pool = createPool(databaseUrl);
   await runMigrations(pool);
   app = await buildApp({ adminApiKey: testAdminApiKey, database: pool });
+  principal = await createTestPrincipal(pool, 'integration');
 });
 
 afterAll(async () => {
@@ -49,6 +52,7 @@ async function createAccount(currency: 'INR' | 'USD' = 'INR'): Promise<string> {
   const response = await app.inject({
     method: 'POST',
     url: '/v1/accounts',
+    headers: { ...principal.authHeaders },
     payload: { currency },
   });
   expect(response.statusCode).toBe(201);
@@ -77,7 +81,7 @@ async function transfer(
   return await app.inject({
     method: 'POST',
     url: '/v1/transfers',
-    headers,
+    headers: { ...principal.authHeaders, ...headers },
     payload: { sourceAccountId, destinationAccountId, amountMinor },
   });
 }

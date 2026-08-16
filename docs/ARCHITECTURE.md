@@ -4,7 +4,7 @@
 
 PulseLedger is a correctness-first payment ledger implemented as a **modular monolith** backed by one PostgreSQL database. This document is the implementation contract for new project work. [PROJECT_PLAN.md](../PROJECT_PLAN.md) defines delivery order and scope; this document defines boundaries and dependency direction.
 
-As of `v1.0.0` the repository implements the foundation, account API, immutable double-entry journal, treasury funding, serializable customer transfers, request idempotency with stable response replay, a transactional outbox drained by a background worker, an idempotent audit consumer fed by that worker, independent balance reconciliation, cursor-paginated journal entries, API-key-protected administrative routes, log redaction, and bounded request limits, all verified against real `EXPLAIN ANALYZE` output and real k6 load (`benchmarks/k6/RESULTS.md`). The feature set is frozen for v1; anything further must be added incrementally through the boundaries below. Diagrams of the structures described here: [diagrams/architecture.md](./diagrams/architecture.md) and [diagrams/transfer-flow.md](./diagrams/transfer-flow.md).
+As of `v1.1.0` the repository implements the foundation, account API, immutable double-entry journal, treasury funding, serializable customer transfers, request idempotency with stable response replay, a transactional outbox drained by a background worker, an idempotent audit consumer fed by that worker, independent balance reconciliation, cursor-paginated journal entries, API-key authentication with database-enforced account ownership, API-key-protected administrative routes, log redaction, and bounded request limits, all verified against real `EXPLAIN ANALYZE` output and real k6 load (`benchmarks/k6/RESULTS.md`). Diagrams of the structures described here: [diagrams/architecture.md](./diagrams/architecture.md) and [diagrams/transfer-flow.md](./diagrams/transfer-flow.md).
 
 ## Current system context
 
@@ -18,7 +18,8 @@ Fastify application (single deployable process)
     | feature ports and transaction-oriented use cases
     v
 PostgreSQL (single source of durable state)
-    |- accounts and cached balances
+    |- principals and hashed API keys
+    |- accounts and cached balances (each owned by a principal)
     |- immutable ledger transactions and journal entries
     |- completed transfer projections
     |- idempotency records and stable responses
@@ -137,7 +138,7 @@ A transfer request executes through a service-owned bounded attempt loop:
 
 1. Validate the HTTP schema, positive integer amount, and distinct account IDs before mutation.
 2. Begin a `SERIALIZABLE` PostgreSQL transaction.
-3. Lock both accounts in ascending UUID order and validate their current status, currency, and source balance.
+3. Lock both accounts in ascending UUID order and validate ownership of the source, then their current status, currency, and source balance — all against the locked rows, so authorization cannot be raced.
 4. Insert one ledger transaction, equal credit/debit journal entries, cached balance updates, and the stable transfer record.
 5. Commit once.
 6. Retry only SQLSTATE `40001` serialization failures and `40P01` deadlocks, using at most 12 attempts with exponential backoff, 50–100% jitter, and a 50 ms delay cap.
@@ -148,11 +149,26 @@ The transfer row, journal, and cached balances are committed atomically. `GET /v
 
 The `transfers` table is a transfer-specific projection, not a second source of financial truth. A composite foreign key requires its ID, currency, and fixed `transfer` ledger type to match one `ledger_transactions` row. Creation time and reference are read from that ledger row rather than duplicated in the projection.
 
+### Current authenticated request
+
+Every customer request resolves an identity before anything else happens:
+
+```text
+request -> onRequest guard -> AuthApplication.authenticate(secret)
+                              |- parse "Bearer <secret>", take the 12-char prefix
+                              |- one indexed read on api_keys (revoked rows excluded)
+                              |- constant-time compare of SHA-256 digests
+                              `- reject a disabled principal
+        -> request.principalId -> route -> application service (owner-scoped queries)
+```
+
+Only a SHA-256 hash of a secret is stored; the secret itself is returned once, by the call that issued it. Every failure mode returns the same `401 UNAUTHORIZED`, so a caller cannot tell an unknown key from a revoked one.
+
 ### Current idempotent monetary command
 
 An idempotent transfer request extends the transaction boundary to claim or replay an idempotency record before mutation and commits its stable response atomically with the transfer.
 
-1. The route extracts the `Idempotency-Key` header and calls the idempotency service.
+1. The route extracts the `Idempotency-Key` header and calls the idempotency service with the authenticated principal; records are unique on `(principal_id, key, operation)`, so two callers may use the same key string without colliding.
 2. On first use: the key is claimed (INSERT as `in_progress`) before entering the transfer service.
 3. On replay: a completed record returns the stored status code and response body immediately.
 4. On conflict: the same key with a different payload body returns `IDEMPOTENCY_CONFLICT`.
@@ -179,22 +195,27 @@ Because delivery is at-least-once but the claim is a unique-constraint insert, t
 
 ## Data and correctness rules
 
-These rules outrank convenience and performance. All eight rules are enforced now.
+These rules outrank convenience and performance. All nine rules are enforced now.
 
 1. Monetary values are integer minor units in PostgreSQL `bigint`; JSON exposes them as decimal strings.
 2. Every posted ledger transaction has total debits equal to total credits in one currency.
 3. Committed journal entries are immutable and are the financial source of truth.
 4. Account identity, currency, and treasury designation are immutable.
 5. Customer balances cannot become negative; demo funding is a journaled treasury transfer.
-6. One idempotency key plus operation identifies one request fingerprint and one stable result.
+6. One principal plus idempotency key and operation identifies one request fingerprint and one stable result.
 7. Journal rows, cached balances, idempotency completion, and outbox creation commit atomically.
 8. Each outbox event produces at most one logical consumer effect.
+9. Every customer account has exactly one owning principal, fixed for the life of the account.
 
 Enforce an invariant in PostgreSQL whenever practical, then test it at the database boundary. TypeScript validation alone is not a sufficient financial control.
 
 ### Current durable model
 
 ```text
+principals (identity) 1 ---- * api_keys (prefix + sha256 hash, revocable)
+    |
+    | owns (immutable, NOT NULL for customer accounts)
+    v
 accounts (identity, status, cached balance)
     ^                              ^
     | account + currency FK        | source/destination + currency FK
@@ -219,7 +240,9 @@ journal_entries * -------- 1 ledger_transactions 1 -------- 0..1 transfers
 - Domain/application code must not depend on Fastify reply objects or status codes.
 - Liveness reports process health without querying PostgreSQL. Readiness verifies required dependencies and reports outbox backlog counts.
 - Secrets, API keys, idempotency payloads, and sensitive request bodies must not be logged. Pino `redact` (`src/infrastructure/http/logging.ts`) is applied whenever logging is enabled, covering `authorization`, `x-admin-api-key`, and `cookie`/`set-cookie` headers regardless of whether Fastify's own request logging currently serializes headers, so a future call that logs them stays safe by construction.
-- `/v1/admin/fund`, `/v1/admin/reconcile`, and `/v1/admin/metrics` require the `x-admin-api-key` header, checked with a constant-time comparison (`src/infrastructure/http/admin-auth.ts`) and wired only at the composition root as a Fastify child-context `preHandler` — the guarded routes themselves stay unaware that authentication exists. No other route is protected.
+- Customer routes (`/v1/accounts*`, `/v1/transfers*`) require `Authorization: Bearer <api key>`; administrative routes require `x-admin-api-key`. Both guards are constant-time comparisons wired only at the composition root, each around its own encapsulated child context, so route files stay unaware that authentication exists. The two credentials are not interchangeable, and only health endpoints are unauthenticated.
+- Both guards run on Fastify's `onRequest` hook, **before** body parsing and schema validation. On `preHandler` (which runs after validation) an anonymous caller would receive schema feedback as a 400 and could map request shapes without a credential.
+- Authorization is account ownership: `accounts.owner_principal_id` is `NOT NULL` for customer accounts, immutable, and checked against the row locked inside the transfer transaction. A resource owned by another principal answers `404`, never `403`, so the API cannot be used to enumerate accounts or transfers. See [ADR-005](./adr/005-api-key-authentication-account-ownership.md).
 - Request size, connection, keep-alive, and total-request timeouts are explicit Fastify constructor options (`bodyLimit`, `connectionTimeout`, `keepAliveTimeout`, `requestTimeout`), configurable via `REQUEST_BODY_LIMIT_BYTES`/`CONNECTION_TIMEOUT_MS`/`KEEP_ALIVE_TIMEOUT_MS`/`REQUEST_TIMEOUT_MS` with bounded defaults rather than Fastify's larger built-in defaults.
 - Shutdown closes the outbox worker, then the Fastify server (which stops accepting new connections and drains in-flight ones; Fastify's default `return503OnClosing` answers any request that still arrives mid-shutdown with 503), then the database pool — verified with a real listening socket in `tests/integration/hardening.integration.test.ts`, not just `app.inject()`.
 

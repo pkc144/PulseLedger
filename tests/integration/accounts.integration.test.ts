@@ -5,12 +5,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../../src/app.js';
 import { createPool } from '../../src/infrastructure/database/pool.js';
 import { runMigrations } from '../../src/infrastructure/database/migrate.js';
+import { createTestPrincipal, type TestPrincipal } from '../helpers/auth.js';
 
 const testAdminApiKey = 'test-admin-api-key-0123456789';
 
 let container: StartedPostgreSqlContainer | undefined;
 let pool: pg.Pool;
 let app: Awaited<ReturnType<typeof buildApp>>;
+let principal: TestPrincipal;
 
 beforeAll(async () => {
   let databaseUrl = process.env.TEST_DATABASE_URL;
@@ -26,6 +28,7 @@ beforeAll(async () => {
   pool = createPool(databaseUrl);
   await runMigrations(pool);
   app = await buildApp({ adminApiKey: testAdminApiKey, database: pool });
+  principal = await createTestPrincipal(pool, 'integration');
 });
 
 afterAll(async () => {
@@ -62,12 +65,17 @@ describe('accounts with PostgreSQL', () => {
     const createdResponse = await app.inject({
       method: 'POST',
       url: '/v1/accounts',
+      headers: { ...principal.authHeaders },
       payload: { currency: 'USD' },
     });
     expect(createdResponse.statusCode).toBe(201);
     const created = createdResponse.json<{ id: string }>();
 
-    const fetchedResponse = await app.inject({ method: 'GET', url: `/v1/accounts/${created.id}` });
+    const fetchedResponse = await app.inject({
+      method: 'GET',
+      url: `/v1/accounts/${created.id}`,
+      headers: { ...principal.authHeaders },
+    });
     expect(fetchedResponse.statusCode).toBe(200);
     expect(fetchedResponse.json()).toMatchObject({
       id: created.id,
@@ -81,22 +89,27 @@ describe('accounts with PostgreSQL', () => {
     const response = await app.inject({
       method: 'GET',
       url: '/v1/accounts/00000000-0000-4000-8000-000000000001',
+      headers: { ...principal.authHeaders },
     });
     expect(response.statusCode).toBe(404);
     expect(response.json()).toMatchObject({ error: { code: 'ACCOUNT_NOT_FOUND' } });
   });
 
   it('returns not found for an unknown account', async () => {
-    const response = await app.inject({ method: 'GET', url: `/v1/accounts/${randomUUID()}` });
+    const response = await app.inject({
+      method: 'GET',
+      url: `/v1/accounts/${randomUUID()}`,
+      headers: { ...principal.authHeaders },
+    });
     expect(response.statusCode).toBe(404);
   });
 
   it('rejects currency mutation at the database boundary', async () => {
     const created = await pool.query<{ id: string }>(
-      `INSERT INTO accounts (id, currency)
-       VALUES ($1, 'INR')
+      `INSERT INTO accounts (id, currency, owner_principal_id)
+       VALUES ($1, 'INR', $2)
        RETURNING id`,
-      [randomUUID()],
+      [randomUUID(), principal.principalId],
     );
     await expect(
       pool.query("UPDATE accounts SET currency = 'USD' WHERE id = $1", [created.rows[0]!.id]),
@@ -114,6 +127,7 @@ describe('GET /v1/accounts/:id/entries', () => {
     const created = await app.inject({
       method: 'POST',
       url: '/v1/accounts',
+      headers: { ...principal.authHeaders },
       payload: { currency: 'INR' },
     });
     const accountId = created.json<{ id: string }>().id;
@@ -133,11 +147,16 @@ describe('GET /v1/accounts/:id/entries', () => {
     const created = await app.inject({
       method: 'POST',
       url: '/v1/accounts',
+      headers: { ...principal.authHeaders },
       payload: { currency: 'INR' },
     });
     const accountId = created.json<{ id: string }>().id;
 
-    const response = await app.inject({ method: 'GET', url: `/v1/accounts/${accountId}/entries` });
+    const response = await app.inject({
+      method: 'GET',
+      url: `/v1/accounts/${accountId}/entries`,
+      headers: { ...principal.authHeaders },
+    });
     expect(response.statusCode).toBe(200);
     expect(response.json<JournalEntriesResponse>()).toEqual({ entries: [], nextCursor: null });
   });
@@ -153,6 +172,7 @@ describe('GET /v1/accounts/:id/entries', () => {
       const response = await app.inject({
         method: 'GET',
         url: `/v1/accounts/${accountId}/entries${query}`,
+        headers: { ...principal.authHeaders },
       });
       expect(response.statusCode).toBe(200);
       const body = response.json<JournalEntriesResponse>();
@@ -176,6 +196,7 @@ describe('GET /v1/accounts/:id/entries', () => {
     const response = await app.inject({
       method: 'GET',
       url: `/v1/accounts/${accountId}/entries?limit=3`,
+      headers: { ...principal.authHeaders },
     });
     expect(response.statusCode).toBe(200);
     const body = response.json<JournalEntriesResponse>();
@@ -187,6 +208,7 @@ describe('GET /v1/accounts/:id/entries', () => {
     const response = await app.inject({
       method: 'GET',
       url: `/v1/accounts/${randomUUID()}/entries`,
+      headers: { ...principal.authHeaders },
     });
     expect(response.statusCode).toBe(404);
     expect(response.json()).toMatchObject({ error: { code: 'ACCOUNT_NOT_FOUND' } });
@@ -197,6 +219,7 @@ describe('GET /v1/accounts/:id/entries', () => {
     const response = await app.inject({
       method: 'GET',
       url: `/v1/accounts/${accountId}/entries?cursor=not-a-real-cursor`,
+      headers: { ...principal.authHeaders },
     });
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({ error: { code: 'INVALID_CURSOR' } });
@@ -208,6 +231,7 @@ describe('double-entry ledger with PostgreSQL', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/v1/accounts',
+      headers: { ...principal.authHeaders },
       payload: { currency },
     });
     expect(response.statusCode).toBe(201);

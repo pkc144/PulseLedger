@@ -1,5 +1,48 @@
 # Changelog
 
+## v1.1.0 — 2026-08-16
+
+Customer-facing authentication and account ownership — the one gap that made the ledger's central
+claim hollow: money could not move _incorrectly_, but anyone who could reach the process could move
+it. Decision record: [ADR-005](./docs/adr/005-api-key-authentication-account-ownership.md).
+
+### Authentication
+
+- **API keys** (`pl_live_` + 32 random bytes) issued per principal. Only a SHA-256 hash and a
+  12-character lookup prefix are stored; the secret is returned exactly once, by the call that
+  created it.
+- Verification is one indexed read plus a constant-time digest comparison. Unknown, mistyped,
+  revoked, and disabled-principal keys all return the same `401 UNAUTHORIZED`.
+- Revocation is immediate — there is no token lifetime to wait out.
+- Both guards moved to Fastify's `onRequest` hook, which runs **before** body validation. On
+  `preHandler` an anonymous caller received schema feedback (`400`) instead of `401`.
+- Admin-only credential management: `POST /v1/admin/principals`,
+  `POST /v1/admin/principals/:id/api-keys`, `POST /v1/admin/api-keys/:id/revoke`. A customer key
+  can never mint or revoke a key.
+
+### Authorization
+
+- `accounts.owner_principal_id` — `NOT NULL` for every customer account, immutable (the trigger that
+  freezes identity and currency now freezes ownership), and indexed.
+- A principal may read only its own accounts and journal entries, and may spend only from accounts
+  it owns. Anyone may be paid. A transfer is readable by either participant.
+- Ownership is validated **inside the transfer's `SERIALIZABLE` transaction against the locked
+  row**, not in the route, so it cannot be raced.
+- Unauthorized resources answer `404`, never `403`, so the API cannot enumerate accounts or
+  transfers.
+- Idempotency keys are now scoped by principal — unique on `(principal_id, key, operation)`. Two
+  callers may both choose `order-42`; neither can replay the other's stored response. Found by a
+  test, not in review.
+
+### Everything else
+
+- Migration `009_customer_authentication.sql` creates `principals` and `api_keys`, adds and
+  backfills ownership (pre-authentication accounts are attributed to one clearly named
+  `legacy-pre-authentication` principal), and re-scopes the idempotency index.
+- The seed script, `scripts/demo.sh`, and all four k6 scenarios now provision a principal and key
+  first, exactly as a real client would. The demo gained an ownership beat.
+- 151 tests (was 126): a new `auth.integration.test.ts` plus ownership cases across the unit suite.
+
 ## v1.0.1 — 2026-08-16
 
 Continuous integration fix and a correction to the v1.0.0 release record. **No application code

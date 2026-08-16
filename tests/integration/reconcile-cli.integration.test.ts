@@ -7,6 +7,7 @@ import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createPool } from '../../src/infrastructure/database/pool.js';
 import { runMigrations } from '../../src/infrastructure/database/migrate.js';
+import { createTestPrincipal, type TestPrincipal } from '../helpers/auth.js';
 
 const execFileAsync = promisify(execFile);
 const cliPath = path.resolve('src/modules/reconciliation/reconcile-cli.ts');
@@ -14,6 +15,7 @@ const cliPath = path.resolve('src/modules/reconciliation/reconcile-cli.ts');
 let container: StartedPostgreSqlContainer | undefined;
 let pool: pg.Pool;
 let databaseUrl: string;
+let principal: TestPrincipal;
 
 beforeAll(async () => {
   databaseUrl = process.env.TEST_DATABASE_URL ?? '';
@@ -28,6 +30,7 @@ beforeAll(async () => {
 
   pool = createPool(databaseUrl);
   await runMigrations(pool);
+  principal = await createTestPrincipal(pool, 'reconcile-cli');
 });
 
 afterAll(async () => {
@@ -71,7 +74,10 @@ describe('reconcile CLI', () => {
 
   it('exits non-zero and prints the issue when a seeded mismatch exists', async () => {
     const accountId = randomUUID();
-    await pool.query(`INSERT INTO accounts (id, currency) VALUES ($1, 'INR')`, [accountId]);
+    await pool.query(
+      `INSERT INTO accounts (id, currency, owner_principal_id) VALUES ($1, 'INR', $2)`,
+      [accountId, principal.principalId],
+    );
     await pool.query('UPDATE accounts SET balance_minor = 999 WHERE id = $1', [accountId]);
 
     try {

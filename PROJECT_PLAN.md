@@ -548,7 +548,8 @@ PulseLedger v1 is finished only when all of the following are true. Evidence for
 
 ## 12. Post-v1 backlog
 
-Consider these only after the release gate is fully green:
+Consider these only after the release gate is fully green. **Delivered since v1.0.0:** customer
+authentication and account ownership (v1.1.0, [ADR-005](./docs/adr/005-api-key-authentication-account-ownership.md)).
 
 - Publish outbox events to Redpanda/Kafka behind the existing worker boundary.
 - Add Redis-backed rate limiting if measured abuse or load requires it.
