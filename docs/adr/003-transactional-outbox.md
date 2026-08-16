@@ -18,7 +18,10 @@ Downstream intent is captured as a row in an `outbox_events` table written **ins
 
 Each event carries an envelope: `id`, `aggregate_id`, `aggregate_type`, `event_type`, an `event_version` schema version (currently `1`), a JSON `payload`, and processing bookkeeping (`status`, `attempts`, `last_error`, `next_attempt_at`, `processed_at`, `created_at`).
 
-A separate `OutboxWorker` process drains the table independently of the request path:
+A separate `OutboxWorker` loop drains the table independently of the request path. "Separate" here
+means separate from the request lifecycle, not a separate deployable: in v1 the worker runs inside
+the same process as the API ([ADR-004](./004-modular-monolith-database-worker.md)), and its claim
+query is written so that moving it to its own process later changes nothing about correctness.
 
 1. It claims a bounded batch with `SELECT ... FOR UPDATE SKIP LOCKED`, so multiple worker instances never claim the same row. Claimed rows move to `processing`.
 2. It runs the handler for each event, then marks it `processed` with a timestamp, or `failed` with the error and a `next_attempt_at`.

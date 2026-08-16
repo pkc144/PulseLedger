@@ -1,120 +1,229 @@
 # PulseLedger
 
-PulseLedger is a correctness-first payment ledger designed to remain safe under concurrent transfers, request retries, and worker failures.
+A correctness-first double-entry payment ledger that stays right when transfers run concurrently,
+clients retry, and background workers crash mid-flight.
 
-This repository has completed **Week 4: request idempotency**. The detailed execution plan is in [PROJECT_PLAN.md](./PROJECT_PLAN.md), and all implementation work follows [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
+TypeScript · Fastify · PostgreSQL 17 · one deployable process · no broker, no cache, no ORM.
 
-## Requirements
+**Status: `v1.0.0`.** Feature-complete against [PROJECT_PLAN.md](./PROJECT_PLAN.md); every claim below
+is backed by a test you can run or a benchmark artifact committed in this repository.
 
-- Node.js 22 LTS or later
-- npm
-- Docker with Docker Compose
+## What this proves
 
-## Local setup
+Four invariants, each enforced by PostgreSQL rather than by application code alone, and each with a
+named automated test.
+
+| #   | Invariant                                                   | Mechanism                                                                         | Proof                                                                                                       |
+| --- | ----------------------------------------------------------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| 1   | Every ledger transaction is balanced: debits equal credits  | Deferred constraint triggers verify totals at `COMMIT`; composite currency FKs    | `rejects an unbalanced transaction atomically at commit` · `accepts generated balanced postings` (property) |
+| 2   | Committed journal entries are immutable and authoritative   | `BEFORE UPDATE OR DELETE` triggers; corrections are reversing postings            | `rejects journal updates and deletes` · `reports a mismatch and does not repair it when the cache drifts`   |
+| 3   | One idempotency key means one request and one stable result | Unique `(key, operation)` claim; the response commits with the transfer           | `handles 50 concurrent identical requests creating exactly one transfer`                                    |
+| 4   | Each outbox event produces at most one logical effect       | Event written inside the transfer's transaction; consumer inbox dedups redelivery | `processes 1,000 duplicate deliveries of the same event into exactly one audit effect`                      |
+
+Full mapping, including the concurrency and recovery matrix: [docs/TESTING.md](./docs/TESTING.md).
+
+## Evidence
+
+| Evidence                    | Result                                                                                                                     |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Automated tests             | **126 passing** — 47 unit, 2 property, 77 integration against real PostgreSQL (`npm test`)                                 |
+| Concurrency under real load | ~14,000 transfer attempts across 4 k6 scenarios; **zero** overdrafts, lost updates, or unbalanced transactions             |
+| Reconciliation after load   | `{ "accountsChecked": 763, "issues": [], "ok": true }` — every cached balance matched the journal exactly                  |
+| Baseline throughput         | 4,129 requests, 134.4 req/s, p50 13.1 ms, p95 269.7 ms (20 VUs, 2-vCPU PostgreSQL container)                               |
+| Observed bottleneck         | `SERIALIZABLE` conflict retries competing for capped database CPU — 16.9% bounded 503s at 75 VUs, reported, not tuned away |
+| Idempotency at load         | 50 truly concurrent identical requests → completed-transfer counter moved by **exactly 1**                                 |
+| Failure mode under stress   | `TRANSFER_RETRY_EXHAUSTED` (503) after 12 bounded retries — the system refuses to trade correctness for throughput         |
+| Crash recovery              | Process `SIGKILL`ed between commit and delivery; on restart the event is delivered and produces exactly one effect         |
+
+Methodology, hardware, and raw k6 output: [benchmarks/k6/RESULTS.md](./benchmarks/k6/RESULTS.md).
+Reproduce the crash-recovery and idempotency results in ~8 seconds with `./scripts/demo.sh`.
+
+## Quick start
+
+Requires **Node.js 22+** (`.nvmrc`), npm, and Docker.
 
 ```bash
-cp .env.example .env
-npm install
+git clone <this-repo> && cd PulseLedger
+cp .env.example .env                       # then set ADMIN_API_KEY to a random 16+ char secret
+npm ci
 docker compose up -d postgres
 npm run db:migrate
-npm run dev
+npm run dev                                # http://localhost:3000
 ```
 
-The service listens on `http://localhost:3000` by default.
-
-## Current API
-
-Check liveness:
+Verify:
 
 ```bash
-curl http://localhost:3000/health/live
+curl -s localhost:3000/health/ready
+# {"status":"ready","outbox":{"pending":0,"processing":0,"failed":0}}
 ```
 
-Check PostgreSQL readiness:
+Run the whole verification gate the way CI does:
 
 ```bash
-curl http://localhost:3000/health/ready
+npm run check      # architecture → lint → typecheck → 126 tests → build
 ```
 
-Create a zero-balance customer account:
+## Move some money
 
 ```bash
-curl -X POST http://localhost:3000/v1/accounts \
-  -H 'content-type: application/json' \
-  -H 'x-request-id: local-example' \
-  -d '{"currency":"INR"}'
+export ADMIN_API_KEY=$(grep ADMIN_API_KEY .env | cut -d= -f2)
+json() { node -pe 'JSON.parse(require("fs").readFileSync(0))'"$1"; }
+
+ALICE=$(curl -s -X POST localhost:3000/v1/accounts -H 'content-type: application/json' \
+          -d '{"currency":"INR"}' | json .id)
+BOB=$(curl -s -X POST localhost:3000/v1/accounts -H 'content-type: application/json' \
+        -d '{"currency":"INR"}' | json .id)
+
+curl -s -X POST localhost:3000/v1/admin/fund -H 'content-type: application/json' \
+  -H "x-admin-api-key: $ADMIN_API_KEY" \
+  -d "{\"accountId\":\"$ALICE\",\"amountMinor\":\"250000\"}"
+
+curl -s -X POST localhost:3000/v1/transfers -H 'content-type: application/json' \
+  -H 'idempotency-key: my-first-transfer' \
+  -d "{\"sourceAccountId\":\"$ALICE\",\"destinationAccountId\":\"$BOB\",\"amountMinor\":\"75000\"}"
 ```
 
-Retrieve an account:
+```json
+{
+  "id": "73c606e2-6a4e-4905-8fbc-846d8c918252",
+  "sourceAccountId": "97a673f8-be2c-4226-a61e-6718e645b594",
+  "destinationAccountId": "184714b5-4832-466d-9c03-9082bdeb384d",
+  "amountMinor": "75000",
+  "currency": "INR",
+  "status": "completed",
+  "reference": "transfer:73c606e2-6a4e-4905-8fbc-846d8c918252",
+  "createdAt": "2026-08-16T10:29:20.883Z"
+}
+```
+
+Send that exact request again with the same `Idempotency-Key` and you get the same body back — same
+ID, same timestamp — and no second transfer exists. Change the amount under the same key and you get
+`409 IDEMPOTENCY_CONFLICT`.
+
+Amounts are **integer minor units as strings** (`"75000"` = ₹750.00). No floats anywhere, and no
+`JSON.parse` rounding: PostgreSQL `bigint` exceeds `Number.MAX_SAFE_INTEGER`.
+
+Every endpoint, every error code, and real captured responses: [docs/API.md](./docs/API.md).
+
+| Method | Path                       | Auth  | Purpose                                    |
+| ------ | -------------------------- | ----- | ------------------------------------------ |
+| `POST` | `/v1/accounts`             | —     | Create a zero-balance customer account     |
+| `GET`  | `/v1/accounts/:id`         | —     | Read an account and its cached balance     |
+| `GET`  | `/v1/accounts/:id/entries` | —     | Cursor-paginated journal entries           |
+| `POST` | `/v1/transfers`            | —     | Transfer money (accepts `Idempotency-Key`) |
+| `GET`  | `/v1/transfers/:id`        | —     | Read a stable transfer result              |
+| `POST` | `/v1/admin/fund`           | Admin | Fund a demo account from its treasury      |
+| `POST` | `/v1/admin/reconcile`      | Admin | Recompute balances from the journal        |
+| `GET`  | `/v1/admin/metrics`        | Admin | In-process transfer counters               |
+| `GET`  | `/health/live`             | —     | Liveness, never touches PostgreSQL         |
+| `GET`  | `/health/ready`            | —     | Readiness plus outbox backlog              |
+
+## How it works
+
+```text
+POST /v1/transfers
+      │
+      ├─ claim the idempotency key            unique (key, operation)
+      │
+      └─ BEGIN SERIALIZABLE ─────────────────────────────────────────────┐
+           lock both accounts in ascending UUID order  (no deadlocks)    │
+           validate status, currency, and the locked balance             │
+           post 2 journal entries + update 2 cached balances             │
+           insert the transfer projection                                │
+           insert the outbox event            ← no dual write            │
+           mark the idempotency record completed                         │
+         COMMIT ──────────────────────────────────────────────────────────┘
+           deferred triggers: debits == credits, finalized, balance >= 0
+
+  outbox worker (same process, polls with FOR UPDATE SKIP LOCKED)
+      → audit consumer: claim (consumer_name, event_id), then record the effect
+        at-least-once delivery · at-most-once effect
+
+  reconciliation: recompute every balance from journal_entries and compare
+```
+
+- **Serializable transfers with bounded retries.** Only SQLSTATE `40001`/`40P01` are retried, at most
+  12 attempts, 2 ms base, 50 ms cap, 50–100% jitter — ≤362 ms of total sleep, then a clear 503.
+- **The journal is the source of truth.** `accounts.balance_minor` is a transactional cache, and
+  reconciliation exists to prove it never silently drifts.
+- **The outbox removes the dual write.** The event and the money commit together or not at all.
+- **The consumer, not the transport, provides exactly-once.** A duplicate delivery's inbox claim
+  conflicts, inserts nothing, and returns a successful no-op.
+
+Diagrams: [system architecture](./docs/diagrams/architecture.md) ·
+[transaction flows](./docs/diagrams/transfer-flow.md). Written contract:
+[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
+
+Decision records:
+
+- [ADR-001 — Double-entry accounting with integer minor units](./docs/adr/001-double-entry-integer-accounting.md)
+- [ADR-002 — Serializable transfers, deterministic locking, bounded retries](./docs/adr/002-serializable-locking-retries.md)
+- [ADR-003 — Transactional outbox instead of a dual write](./docs/adr/003-transactional-outbox.md)
+- [ADR-004 — Modular monolith with a database-backed worker](./docs/adr/004-modular-monolith-database-worker.md)
+
+## Commands
 
 ```bash
-curl http://localhost:3000/v1/accounts/ACCOUNT_ID
+npm run dev                # watch mode
+npm run check              # architecture + lint + typecheck + tests + build (the local gate)
+npm test                   # 126 tests (Testcontainers starts PostgreSQL if needed)
+npm run test:unit          # 47 tests, no database
+npm run test:integration   # 77 tests against real PostgreSQL
+npm run db:migrate         # apply pending migrations
+npm run reconcile          # recompute balances from the journal; non-zero exit on drift
+npm run seed               # realistic dataset via the real services (SEED_ACCOUNTS / SEED_TRANSFERS)
+./scripts/demo.sh          # the four-invariant demonstration, ~8 seconds
+npm run build && npm start # production build and run
 ```
 
-Fund a demo account from its currency treasury:
+Benchmark commands and per-scenario intent: [docs/TESTING.md](./docs/TESTING.md).
 
-```bash
-curl -X POST http://localhost:3000/v1/admin/fund \
-  -H 'content-type: application/json' \
-  -d '{"accountId":"ACCOUNT_ID","amountMinor":"10000"}'
+## Configuration
+
+`.env` is read by your shell/`--env-file`; the process validates everything before it listens.
+
+| Variable                     | Default            | Notes                                                         |
+| ---------------------------- | ------------------ | ------------------------------------------------------------- |
+| `DATABASE_URL`               | — (required)       | PostgreSQL connection string                                  |
+| `ADMIN_API_KEY`              | — (required)       | ≥16 chars; guards `/v1/admin/*`                               |
+| `PORT` / `HOST`              | `3000` / `0.0.0.0` |                                                               |
+| `NODE_ENV`                   | `development`      | `development` \| `test` \| `production`                       |
+| `LOG_LEVEL`                  | `info`             | Pino level; secrets are redacted at every level               |
+| `OUTBOX_POLL_INTERVAL_MS`    | `1000`             | Worker poll cadence                                           |
+| `OUTBOX_BATCH_SIZE`          | `10`               | Events claimed per poll                                       |
+| `OUTBOX_MAX_ATTEMPTS`        | `12`               | Then the event is parked as permanently failed                |
+| `OUTBOX_CLAIM_LEASE_SECONDS` | `300`              | How long a claim is held before another worker may reclaim it |
+| `REQUEST_BODY_LIMIT_BYTES`   | `16384`            | Larger bodies get `413 REQUEST_REJECTED`                      |
+| `CONNECTION_TIMEOUT_MS`      | `10000`            |                                                               |
+| `KEEP_ALIVE_TIMEOUT_MS`      | `5000`             |                                                               |
+| `REQUEST_TIMEOUT_MS`         | `30000`            |                                                               |
+
+## What this is not
+
+Customer routes are unauthenticated, there is one static admin key, metrics are in-process only, and
+the outbox has no retention policy — this is a correctness demonstrator, not a deployable payments
+platform. The full honest list, with the seams each extension would use, is in
+[docs/TRADEOFFS.md](./docs/TRADEOFFS.md).
+
+## Repository map
+
+```text
+src/modules/<feature>/     vertical slices: *-domain (ports) · *-service · *-routes · *-repository
+src/infrastructure/        pool, migrations, logging redaction, admin auth
+src/app.ts · src/server.ts composition root · process entrypoint
+migrations/                ordered SQL; every invariant that can live in the database does
+tests/                     unit · property · integration (concurrency, recovery, end-to-end)
+benchmarks/k6/             four scenarios, raw output, and RESULTS.md
+scripts/                   architecture checker · seeder · demo.sh
+docs/                      ARCHITECTURE · API · TESTING · TRADEOFFS · DEMO · adr/ · diagrams/
 ```
 
-Transfer funds between two active accounts with the same currency:
+`npm run architecture:check` fails the build if a dependency crosses a module boundary the wrong way.
 
-```bash
-curl -X POST http://localhost:3000/v1/transfers \
-  -H 'content-type: application/json' \
-  -H 'idempotency-key: my-unique-key' \
-  -d '{"sourceAccountId":"SOURCE_ID","destinationAccountId":"DESTINATION_ID","amountMinor":"2500"}'
-```
+## More
 
-Transfers accept an optional `Idempotency-Key` header. Repeating a request with the same key and body replays the original response without creating a duplicate transfer. A different body under the same key returns `IDEMPOTENCY_CONFLICT`. Stale in-progress claims are reclaimed after 30 seconds.
-
-Retrieve the stable transfer result:
-
-```bash
-curl http://localhost:3000/v1/transfers/TRANSFER_ID
-```
-
-Supported demo currencies are `INR` and `USD`. The migration seeds a hidden treasury account for each currency. Funding debits the customer asset account and credits the matching treasury in one balanced posting.
-
-Balances are serialized as decimal strings because JavaScript numbers cannot safely represent every PostgreSQL `bigint` value.
-
-## Development commands
-
-```bash
-npm run dev               # Start with file watching
-npm run db:migrate        # Apply pending SQL migrations
-npm run architecture:check # Enforce module dependency boundaries
-npm run format:check      # Check formatting
-npm run lint              # Run ESLint
-npm run typecheck         # Run strict TypeScript checks
-npm run test:unit         # Run tests without PostgreSQL
-npm run test:integration  # Run real PostgreSQL tests
-npm test                  # Run the complete test suite
-npm run build             # Compile production JavaScript
-npm run check             # Run the main local verification gate
-```
-
-Integration tests use `TEST_DATABASE_URL` when supplied. Otherwise, Testcontainers starts an isolated PostgreSQL 17 container.
-
-## Current guarantees
-
-- Configuration is validated before the server starts.
-- Accounts have UUID identities, fixed ISO currency, status, and integer minor-unit balances.
-- Customer accounts start at zero and cannot have a negative cached balance.
-- Account identity, currency, and treasury designation are immutable in PostgreSQL.
-- Money accepts only positive integer minor units up to the PostgreSQL `bigint` maximum.
-- Every committed ledger transaction has equal debits and credits in one currency.
-- Journal entries and finalized ledger transactions are append-only.
-- Demo funding updates the journal and both cached balances atomically.
-- Transfers run at `SERIALIZABLE` isolation and lock accounts in deterministic UUID order.
-- Concurrent withdrawals cannot overdraw a customer account or create partial postings.
-- Serialization and deadlock failures use a bounded 12-attempt retry policy with capped jittered backoff.
-- Idempotency keys guarantee exactly one execution per key+operation pair with stable response replay.
-- Completed idempotency records commit atomically with the transfer inside one SERIALIZABLE transaction.
-- Stale in-progress idempotency records (default 30 s) are reclaimed by retrying requests.
-- Errors use stable machine codes and include a request ID.
-- Liveness is independent of PostgreSQL; readiness verifies a live query.
-
-The transactional outbox, reconciliation, and benchmarks are delivered in later weekly gates defined by the project plan.
+- [docs/DEMO.md](./docs/DEMO.md) — the three-minute walkthrough, timed
+- [PROJECT_PLAN.md](./PROJECT_PLAN.md) — the eight-week plan, gates, and progress tracker
+- [docs/release/v1.0.0.md](./docs/release/v1.0.0.md) — release verification record
+- [docs/weeks-1-2-study-guide.md](./docs/weeks-1-2-study-guide.md) — background notes

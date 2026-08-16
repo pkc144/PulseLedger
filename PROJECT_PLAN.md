@@ -436,20 +436,20 @@ Freeze features, verify the complete system, and publish evidence that another d
 
 ### Tasks
 
-- [ ] Freeze features at the start of the week.
-- [ ] Complete the README in the planned evidence-first order.
-- [ ] Add architecture and transaction-flow diagrams.
-- [ ] Review and finalize all four ADRs.
-- [ ] Add copy-paste API examples and expected responses.
-- [ ] Document trade-offs, limitations, and post-v1 extensions.
-- [ ] Document every test and benchmark command.
-- [ ] Run a clean-clone installation and migration test.
-- [ ] Run the complete unit, property, integration, concurrency, recovery, and end-to-end suite.
-- [ ] Run and save the final benchmark evidence.
-- [ ] Verify documentation against the actual implementation.
-- [ ] Prepare and rehearse the three-minute demonstration.
-- [ ] Complete the résumé bullet using measured results only.
-- [ ] Create a verified `v1.0.0` release tag.
+- [x] Freeze features at the start of the week. No `src/` behavior changed in Week 8.
+- [x] Complete the README in the planned evidence-first order.
+- [x] Add architecture and transaction-flow diagrams (`docs/diagrams/`).
+- [x] Review and finalize all four ADRs (index in `docs/adr/README.md`; ADR-003 wording corrected, ADR-002 updated with measured outcomes).
+- [x] Add copy-paste API examples and expected responses (`docs/API.md`, captured from a running server).
+- [x] Document trade-offs, limitations, and post-v1 extensions (`docs/TRADEOFFS.md`).
+- [x] Document every test and benchmark command (`docs/TESTING.md`).
+- [x] Run a clean-clone installation and migration test.
+- [x] Run the complete unit, property, integration, concurrency, recovery, and end-to-end suite. 126 passed.
+- [x] Run and save the final benchmark evidence (`benchmarks/k6/results/release-v1.0.0/`).
+- [x] Verify documentation against the actual implementation.
+- [x] Prepare and rehearse the three-minute demonstration (`scripts/demo.sh`, 7.8 s measured; `docs/DEMO.md` narrated at 2:55).
+- [x] Complete the résumé bullet using measured results only.
+- [x] Create a verified `v1.0.0` release tag.
 
 ### Three-minute demonstration
 
@@ -462,14 +462,14 @@ Freeze features, verify the complete system, and publish evidence that another d
 
 ### Verification
 
-- [ ] A fresh clone starts exactly as documented.
-- [ ] Each core invariant points to a named automated test.
-- [ ] Concurrent duplicate and worker recovery tests pass.
-- [ ] Reconciliation detects a seeded mismatch.
-- [ ] The benchmark is independently reproducible.
-- [ ] Architecture diagrams match the implementation.
-- [ ] The demonstration completes in under three minutes.
-- [ ] The release tag points to the fully verified commit.
+- [x] A fresh clone starts exactly as documented.
+- [x] Each core invariant points to a named automated test.
+- [x] Concurrent duplicate and worker recovery tests pass.
+- [x] Reconciliation detects a seeded mismatch.
+- [x] The benchmark is independently reproducible.
+- [x] Architecture diagrams match the implementation.
+- [x] The demonstration completes in under three minutes.
+- [x] The release tag points to the fully verified commit.
 
 ### Week 8 deliverable
 
@@ -515,35 +515,36 @@ A polished, reproducible `v1.0.0` release with implementation, tests, benchmarks
 
 Update this table at the end of every implementation session.
 
-| Week                        | Status      | Completion | Gate result | Notes                                                                                                                                                                              |
-| --------------------------- | ----------- | ---------: | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1 — Foundation              | Complete    |       100% | Passed      | 15 automated tests and local API smoke test passed                                                                                                                                 |
-| 2 — Journal                 | Complete    |       100% | Passed      | Immutable balanced journal and funding gate passed                                                                                                                                 |
-| 3 — Transfers               | Complete    |       100% | Passed      | Concurrency, reference-model, and architecture gates passed                                                                                                                        |
-| 4 — Idempotency             | Complete    |       100% | Passed      | 66 tests, idempotency replay/conflict/concurrency gates passed                                                                                                                     |
-| 5 — Outbox                  | Complete    |       100% | Passed      | Transactional outbox + worker; atomic event, SKIP LOCKED claim, crash-lease recovery, health stats; ADR-003                                                                        |
-| 6 — Consumer/reconciliation | Complete    |       100% | Passed      | Idempotent audit consumer (1,000-duplicate test), read-only reconciliation (CLI + admin endpoint), ADR-004                                                                         |
-| 7 — Quality/benchmark       | Complete    |       100% | Passed      | Admin API-key auth, pagination, log redaction, request limits; real k6 results (4 scenarios, ~14k transfers, 0 reconciliation issues); index verification via real EXPLAIN ANALYZE |
-| 8 — Release                 | Not started |         0% | Pending     |                                                                                                                                                                                    |
+| Week                        | Status   | Completion | Gate result | Notes                                                                                                                                                                                                |
+| --------------------------- | -------- | ---------: | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 — Foundation              | Complete |       100% | Passed      | 15 automated tests and local API smoke test passed                                                                                                                                                   |
+| 2 — Journal                 | Complete |       100% | Passed      | Immutable balanced journal and funding gate passed                                                                                                                                                   |
+| 3 — Transfers               | Complete |       100% | Passed      | Concurrency, reference-model, and architecture gates passed                                                                                                                                          |
+| 4 — Idempotency             | Complete |       100% | Passed      | 66 tests, idempotency replay/conflict/concurrency gates passed                                                                                                                                       |
+| 5 — Outbox                  | Complete |       100% | Passed      | Transactional outbox + worker; atomic event, SKIP LOCKED claim, crash-lease recovery, health stats; ADR-003                                                                                          |
+| 6 — Consumer/reconciliation | Complete |       100% | Passed      | Idempotent audit consumer (1,000-duplicate test), read-only reconciliation (CLI + admin endpoint), ADR-004                                                                                           |
+| 7 — Quality/benchmark       | Complete |       100% | Passed      | Admin API-key auth, pagination, log redaction, request limits; real k6 results (4 scenarios, ~14k transfers, 0 reconciliation issues); index verification via real EXPLAIN ANALYZE                   |
+| 8 — Release                 | Complete |       100% | Passed      | README/API/TESTING/TRADEOFFS/DEMO docs, mermaid architecture + flow diagrams, ADR index and corrections, clean-clone test, 126 tests green, benchmarks re-run on the release commit, `v1.0.0` tagged |
 
 Allowed status values: `Not started`, `In progress`, `Blocked`, and `Complete`.
 
 ## 11. Release gate
 
-PulseLedger v1 is finished only when all of the following are true:
+PulseLedger v1 is finished only when all of the following are true. Evidence for every row:
+[docs/release/v1.0.0.md](./docs/release/v1.0.0.md).
 
-- [ ] Fresh clone starts as documented.
-- [ ] The four invariants have named automated tests.
-- [ ] Concurrent duplicate requests create one transfer.
-- [ ] Worker recovery creates one logical audit effect.
-- [ ] Reconciliation detects intentional corruption.
-- [ ] All retry policies are bounded and observable.
-- [ ] CI passes linting, type checks, tests, migrations, and build.
-- [ ] Benchmarks are reproducible and contain no invented metrics.
-- [ ] Architecture documentation matches the code.
-- [ ] Four ADRs are complete.
-- [ ] The demo completes in under three minutes.
-- [ ] `v1.0.0` points to the verified commit.
+- [x] Fresh clone starts as documented.
+- [x] The four invariants have named automated tests.
+- [x] Concurrent duplicate requests create one transfer.
+- [x] Worker recovery creates one logical audit effect.
+- [x] Reconciliation detects intentional corruption.
+- [x] All retry policies are bounded and observable.
+- [x] CI passes linting, type checks, tests, migrations, and build.
+- [x] Benchmarks are reproducible and contain no invented metrics.
+- [x] Architecture documentation matches the code.
+- [x] Four ADRs are complete.
+- [x] The demo completes in under three minutes.
+- [x] `v1.0.0` points to the verified commit.
 
 ## 12. Post-v1 backlog
 

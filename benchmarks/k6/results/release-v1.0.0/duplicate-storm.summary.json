@@ -1,0 +1,175 @@
+{
+    "metrics": {
+        "http_req_sending": {
+            "avg": 0.5592727272727273,
+            "min": 0.011,
+            "med": 0.139,
+            "max": 4.177,
+            "p(90)": 2.5834,
+            "p(95)": 2.6502
+        },
+        "data_sent": {
+            "count": 17096,
+            "rate": 327616.27349903225
+        },
+        "iterations": {
+            "rate": 958.1664526761589,
+            "count": 50
+        },
+        "http_req_duration": {
+            "p(90)": 23.8394,
+            "p(95)": 24.0345,
+            "avg": 17.04572727272727,
+            "min": 0.237,
+            "med": 18.169,
+            "max": 29.068
+        },
+        "http_req_connecting": {
+            "med": 0.466,
+            "max": 2.254,
+            "p(90)": 0.8734000000000002,
+            "p(95)": 1.0241999999999998,
+            "avg": 0.49578181818181843,
+            "min": 0
+        },
+        "http_req_blocked": {
+            "med": 0.722,
+            "max": 3.46,
+            "p(90)": 2.907,
+            "p(95)": 2.9790999999999994,
+            "avg": 1.1492727272727272,
+            "min": 0.003
+        },
+        "http_req_tls_handshaking": {
+            "p(90)": 0,
+            "p(95)": 0,
+            "avg": 0,
+            "min": 0,
+            "med": 0,
+            "max": 0
+        },
+        "iteration_duration": {
+            "avg": 20.090992860000007,
+            "min": 12.232201,
+            "med": 19.414451,
+            "max": 30.097267,
+            "p(90)": 27.098164699999998,
+            "p(95)": 27.21835425
+        },
+        "checks": {
+            "passes": 55,
+            "fails": 0,
+            "value": 1
+        },
+        "data_received": {
+            "rate": 390395.33947837417,
+            "count": 20372
+        },
+        "http_req_duration{expected_response:true}": {
+            "avg": 17.04572727272727,
+            "min": 0.237,
+            "med": 18.169,
+            "max": 29.068,
+            "p(90)": 23.8394,
+            "p(95)": 24.0345
+        },
+        "http_req_failed": {
+            "passes": 0,
+            "fails": 55,
+            "thresholds": {
+                "rate<0.01": false
+            },
+            "value": 0
+        },
+        "http_reqs": {
+            "count": 55,
+            "rate": 1053.9830979437747
+        },
+        "http_req_waiting": {
+            "avg": 16.424799999999994,
+            "min": 0.204,
+            "med": 16.287,
+            "max": 28.839,
+            "p(90)": 23.7522,
+            "p(95)": 23.952099999999998
+        },
+        "http_req_receiving": {
+            "avg": 0.06165454545454543,
+            "min": 0.022,
+            "med": 0.056,
+            "max": 0.135,
+            "p(90)": 0.099,
+            "p(95)": 0.1273
+        }
+    },
+    "setup_data": {
+        "before": {
+            "completed": 2532,
+            "exhausted": 206,
+            "retries": 9574
+        },
+        "destination": "838425f7-805c-4ce3-a46d-1916a8d29baf",
+        "idempotencyKey": "duplicate-storm-1786877239770",
+        "source": "2a38ecf1-37ed-45a3-8b52-d5dd83ede430"
+    },
+    "root_group": {
+        "name": "",
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e",
+        "groups": {
+            "setup": {
+                "name": "setup",
+                "path": "::setup",
+                "id": "5c0f8025f7e0b6654089e5b00e950f1a",
+                "groups": {},
+                "checks": {
+                        "account created (201)": {
+                            "path": "::setup::account created (201)",
+                            "id": "563590ec7251b28839b43a6f7b7f4c0a",
+                            "passes": 2,
+                            "fails": 0,
+                            "name": "account created (201)"
+                        },
+                        "funded (201)": {
+                            "path": "::setup::funded (201)",
+                            "id": "2feaa273242a34c19ae70613faa56326",
+                            "passes": 1,
+                            "fails": 0,
+                            "name": "funded (201)"
+                        },
+                        "metrics ok (200)": {
+                            "name": "metrics ok (200)",
+                            "path": "::setup::metrics ok (200)",
+                            "id": "32ea4d525f685d282c9c647ea1da5d0d",
+                            "passes": 1,
+                            "fails": 0
+                        }
+                    }
+            },
+            "teardown": {
+                "name": "teardown",
+                "path": "::teardown",
+                "id": "a8a9942382e8ffe2e56ef29e664b8229",
+                "groups": {},
+                "checks": {
+                        "metrics ok (200)": {
+                            "name": "metrics ok (200)",
+                            "path": "::teardown::metrics ok (200)",
+                            "id": "88489c169e4a4a50762a5b5be8cc5e2d",
+                            "passes": 1,
+                            "fails": 0
+                        }
+                    }
+            }
+        },
+        "checks": {
+            "got 201 (won the race) or 409 (correctly rejected)": {
+                "name": "got 201 (won the race) or 409 (correctly rejected)",
+                "path": "::got 201 (won the race) or 409 (correctly rejected)",
+                "id": "545b5deae006a45780e89cbdd8446dbc",
+                "passes": 50,
+                "fails": 0
+            }
+        }
+    }
+}

@@ -106,6 +106,39 @@ final balance was verified over HTTP in `teardown()` to be non-negative and exac
 (sum of final balances == sum of initial funding). Heavy, sustained contention never produced an
 overdraft or a lost update.
 
+## Release re-verification (v1.0.0)
+
+The four scenarios were run again unchanged on 2026-08-16 as part of the release gate, on the same
+host and the same 2 CPU / 2 GiB container, against a freshly migrated and freshly seeded database
+(300 accounts / 3,000 transfers). Raw stdout and summary JSON:
+[`results/release-v1.0.0/`](./results/release-v1.0.0/). The application code is unchanged from the
+run above — Week 8 added documentation, diagrams, and `scripts/demo.sh` only.
+
+| Scenario                 | Requests | Throughput  | p50      | p90      | p95      | `http_req_failed` | Retry-exhausted |
+| ------------------------ | -------- | ----------- | -------- | -------- | -------- | ----------------- | --------------- |
+| `normal-transfer`        | 2,940    | 95.0 req/s  | 30.8 ms  | 352.8 ms | 471.8 ms | 7.00% (206)       | 206             |
+| `duplicate-storm`        | 55       | 1054 req/s  | 18.2 ms  | 23.8 ms  | 24.0 ms  | 0.00% (0)         | —               |
+| `hot-account-contention` | 2,868    | 141.5 req/s | 133.6 ms | 403.0 ms | 426.9 ms | 25.13% (721)      | 721             |
+| `broad-concurrency`      | 6,190    | 118.9 req/s | 269.2 ms | 758.0 ms | 1620 ms  | 4.15% (257)       | 257             |
+
+What reproduced exactly:
+
+- **The invariants.** `duplicate-storm` again moved the completed-transfer counter by **exactly 1**
+  across 50 concurrent identical requests. `hot-account-contention` and `broad-concurrency` again
+  passed every in-scenario check (balances non-negative and conserved, 100% of checks succeeded).
+- **The self-consistency property.** In all three contention scenarios the `http_req_failed` count
+  equals the `TRANSFER_RETRY_EXHAUSTED` delta read from `/v1/admin/metrics` exactly (206/206,
+  721/721, 257/257) — the only non-2xx responses are still the bounded-retry path.
+- **Reconciliation.** After 11,184 transfer attempts (10,000 completed, 1,184 exhausted) across all
+  four scenarios: `{ "accountsChecked": 719, "issues": [], "ok": true }`.
+
+What did **not** reproduce exactly, and why that is expected: the per-scenario latency and failure
+percentages moved in both directions (`normal-transfer` 2.25% → 7.00%, `broad-concurrency` 16.92% →
+4.15%). These are run-to-run variance on a shared developer machine with a hard 2-vCPU database cap —
+exactly the sensitivity the environment note at the top of this file warns about. The qualitative
+conclusion is unchanged and was reproduced: under `SERIALIZABLE` contention this system degrades by
+returning bounded 503s and higher tail latency, never by losing or duplicating money.
+
 ## Reproducing
 
 ```bash

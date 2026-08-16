@@ -36,6 +36,15 @@ Every retry logs the transfer ID, SQLSTATE, retry attempt, and selected delay. C
 - Higher contention increases latency and may return a retry-exhausted response instead of waiting without bound.
 - The complete transfer response is durable and can be retrieved by ID, but duplicate client requests are not yet idempotent; Week 4 adds that contract.
 
+## Update at v1.0.0
+
+The decision shipped unchanged, and the retry policy has since been measured rather than assumed
+([benchmarks/k6/RESULTS.md](../../benchmarks/k6/RESULTS.md)):
+
+- Duplicate requests became idempotent in Week 4 as anticipated above; the idempotency record now completes inside this same `SERIALIZABLE` transaction.
+- Under deliberate hot-account contention (30 VUs, 3 accounts) 21.52% of requests ended in `TRANSFER_RETRY_EXHAUSTED` with p95 at 384 ms, and every exhausted count matched the observed 503 count exactly — the bound behaves as specified, and nothing else fails silently.
+- Across ~14,000 transfer attempts no account went negative and reconciliation reported zero issues, which is the outcome this isolation level was chosen to guarantee.
+
 ## Alternatives considered
 
 - Read Committed with an application balance check was rejected because concurrent requests can both validate stale state.

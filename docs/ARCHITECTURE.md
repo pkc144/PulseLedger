@@ -4,7 +4,7 @@
 
 PulseLedger is a correctness-first payment ledger implemented as a **modular monolith** backed by one PostgreSQL database. This document is the implementation contract for new project work. [PROJECT_PLAN.md](../PROJECT_PLAN.md) defines delivery order and scope; this document defines boundaries and dependency direction.
 
-The repository currently implements the foundation, account API, immutable double-entry journal, treasury funding, serializable customer transfers, request idempotency with stable response replay, a transactional outbox drained by a background worker, an idempotent audit consumer fed by that worker, independent balance reconciliation, cursor-paginated journal entries, API-key-protected administrative routes, log redaction, and bounded request limits, all verified against real `EXPLAIN ANALYZE` output and real k6 load (`benchmarks/k6/RESULTS.md`). Release polish (Week 8) remains planned work and must be added incrementally through the boundaries below.
+As of `v1.0.0` the repository implements the foundation, account API, immutable double-entry journal, treasury funding, serializable customer transfers, request idempotency with stable response replay, a transactional outbox drained by a background worker, an idempotent audit consumer fed by that worker, independent balance reconciliation, cursor-paginated journal entries, API-key-protected administrative routes, log redaction, and bounded request limits, all verified against real `EXPLAIN ANALYZE` output and real k6 load (`benchmarks/k6/RESULTS.md`). The feature set is frozen for v1; anything further must be added incrementally through the boundaries below. Diagrams of the structures described here: [diagrams/architecture.md](./diagrams/architecture.md) and [diagrams/transfer-flow.md](./diagrams/transfer-flow.md).
 
 ## Current system context
 
@@ -244,4 +244,4 @@ A feature is complete only when its relevant rejection, concurrency, and failure
 6. Wire concrete services and adapters only in a composition root or process entrypoint.
 7. Add migrations and tests that demonstrate the invariants, then update this document if the architecture contract changes.
 
-Material architectural decisions should be recorded in `docs/adr/` when their planned delivery gate is reached. In particular, the project plan calls for ADRs covering double-entry integer accounting, serializable locking/retries, the transactional outbox, and the modular-monolith worker boundary.
+Material architectural decisions are recorded in [`docs/adr/`](./adr/README.md). The four v1 records cover double-entry integer accounting, serializable locking/retries, the transactional outbox, and the modular-monolith worker boundary; a change that invalidates one of them needs a new ADR, not an edit to the old one.

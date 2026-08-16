@@ -1,0 +1,119 @@
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+
+     execution: local
+        script: benchmarks/k6/hot-account-contention.js
+        output: -
+
+     scenarios: (100.00%) 1 scenario, 30 max VUs, 50s max duration (incl. graceful stop):
+              * hot_account_contention: 30 looping VUs for 20s (gracefulStop: 30s)
+
+
+running (01.0s), 30/30 VUs, 118 complete and 0 interrupted iterations
+hot_account_contention   [   5% ] 30 VUs  01.0s/20s
+
+running (02.0s), 30/30 VUs, 253 complete and 0 interrupted iterations
+hot_account_contention   [  10% ] 30 VUs  02.0s/20s
+
+running (03.0s), 30/30 VUs, 398 complete and 0 interrupted iterations
+hot_account_contention   [  15% ] 30 VUs  03.0s/20s
+
+running (04.0s), 30/30 VUs, 532 complete and 0 interrupted iterations
+hot_account_contention   [  20% ] 30 VUs  04.0s/20s
+
+running (05.0s), 30/30 VUs, 684 complete and 0 interrupted iterations
+hot_account_contention   [  25% ] 30 VUs  05.0s/20s
+
+running (06.0s), 30/30 VUs, 826 complete and 0 interrupted iterations
+hot_account_contention   [  30% ] 30 VUs  06.0s/20s
+
+running (07.0s), 30/30 VUs, 967 complete and 0 interrupted iterations
+hot_account_contention   [  35% ] 30 VUs  07.0s/20s
+
+running (08.0s), 30/30 VUs, 1117 complete and 0 interrupted iterations
+hot_account_contention   [  40% ] 30 VUs  08.0s/20s
+
+running (09.0s), 30/30 VUs, 1271 complete and 0 interrupted iterations
+hot_account_contention   [  45% ] 30 VUs  09.0s/20s
+
+running (10.0s), 30/30 VUs, 1418 complete and 0 interrupted iterations
+hot_account_contention   [  50% ] 30 VUs  10.0s/20s
+
+running (11.0s), 30/30 VUs, 1566 complete and 0 interrupted iterations
+hot_account_contention   [  55% ] 30 VUs  11.0s/20s
+
+running (12.0s), 30/30 VUs, 1676 complete and 0 interrupted iterations
+hot_account_contention   [  60% ] 30 VUs  12.0s/20s
+
+running (13.0s), 30/30 VUs, 1816 complete and 0 interrupted iterations
+hot_account_contention   [  65% ] 30 VUs  13.0s/20s
+
+running (14.0s), 30/30 VUs, 1972 complete and 0 interrupted iterations
+hot_account_contention   [  70% ] 30 VUs  14.0s/20s
+
+running (15.0s), 30/30 VUs, 2120 complete and 0 interrupted iterations
+hot_account_contention   [  75% ] 30 VUs  15.0s/20s
+
+running (16.0s), 30/30 VUs, 2263 complete and 0 interrupted iterations
+hot_account_contention   [  80% ] 30 VUs  16.0s/20s
+
+running (17.0s), 30/30 VUs, 2389 complete and 0 interrupted iterations
+hot_account_contention   [  85% ] 30 VUs  17.0s/20s
+
+running (18.0s), 30/30 VUs, 2521 complete and 0 interrupted iterations
+hot_account_contention   [  90% ] 30 VUs  18.0s/20s
+
+running (19.0s), 30/30 VUs, 2672 complete and 0 interrupted iterations
+hot_account_contention   [  95% ] 30 VUs  19.0s/20s
+
+running (20.0s), 30/30 VUs, 2821 complete and 0 interrupted iterations
+hot_account_contention   [ 100% ] 30 VUs  20.0s/20s
+time="2026-08-16T16:17:40+05:30" level=info msg="[hot-account-contention] completed: 2533 -> 4669 (retries: 9574 -> 26554, exhausted: 206 -> 927)" source=console
+time="2026-08-16T16:17:40+05:30" level=info msg="[hot-account-contention] final balance c6dd8ec8-2013-4c6d-a13f-35590e511b2a = 99999810" source=console
+time="2026-08-16T16:17:40+05:30" level=info msg="[hot-account-contention] final balance a064daed-51e0-4246-9b7d-657021abefc4 = 100000290" source=console
+time="2026-08-16T16:17:40+05:30" level=info msg="[hot-account-contention] final balance 0bcd1341-7a50-4d9a-ad32-906517a78e02 = 99999900" source=console
+
+
+  █ THRESHOLDS 
+
+    http_req_duration
+    ✓ 'p(95)<2000' p(95)=426.9ms
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 2865    141.340908/s
+    checks_succeeded...: 100.00% 2865 out of 2865
+    checks_failed......: 0.00%   0 out of 2865
+
+    ✓ account created (201)
+    ✓ funded (201)
+    ✓ metrics ok (200)
+    ✓ transfer succeeded or bounded-retry-exhausted
+
+    HTTP
+    http_req_duration..............: avg=189.8ms  min=409µs  med=133.56ms max=614.33ms p(90)=402.97ms p(95)=426.9ms 
+      { expected_response:true }...: avg=120.07ms min=409µs  med=65.72ms  max=608.22ms p(90)=311.88ms p(95)=365.71ms
+    http_req_failed................: 25.13% 721 out of 2868
+    http_reqs......................: 2868   141.488909/s
+
+    EXECUTION
+    iteration_duration.............: avg=211.02ms min=28.6ms med=155.17ms max=634.92ms p(90)=423.4ms  p(95)=447.46ms
+    iterations.....................: 2857   140.946239/s
+    vus............................: 30     min=30          max=30
+    vus_max........................: 30     min=30          max=30
+
+    NETWORK
+    data_received..................: 1.3 MB 65 kB/s
+    data_sent......................: 984 kB 49 kB/s
+
+
+
+
+running (20.3s), 00/30 VUs, 2857 complete and 0 interrupted iterations
+hot_account_contention ✓ [ 100% ] 30 VUs  20s

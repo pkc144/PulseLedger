@@ -1,0 +1,151 @@
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+
+     execution: local
+        script: benchmarks/k6/normal-transfer.js
+        output: -
+
+     scenarios: (100.00%) 1 scenario, 20 max VUs, 1m0s max duration (incl. graceful stop):
+              * normal_transfer: 20 looping VUs for 30s (gracefulStop: 30s)
+
+
+running (0m01.0s), 20/20 VUs, 5 complete and 0 interrupted iterations
+normal_transfer   [   1% ] 20 VUs  00.3s/30s
+
+running (0m02.0s), 20/20 VUs, 76 complete and 0 interrupted iterations
+normal_transfer   [   4% ] 20 VUs  01.3s/30s
+
+running (0m03.0s), 20/20 VUs, 145 complete and 0 interrupted iterations
+normal_transfer   [   8% ] 20 VUs  02.3s/30s
+
+running (0m04.0s), 20/20 VUs, 229 complete and 0 interrupted iterations
+normal_transfer   [  11% ] 20 VUs  03.3s/30s
+
+running (0m05.0s), 20/20 VUs, 304 complete and 0 interrupted iterations
+normal_transfer   [  14% ] 20 VUs  04.3s/30s
+
+running (0m06.0s), 20/20 VUs, 386 complete and 0 interrupted iterations
+normal_transfer   [  18% ] 20 VUs  05.3s/30s
+
+running (0m07.0s), 20/20 VUs, 487 complete and 0 interrupted iterations
+normal_transfer   [  21% ] 20 VUs  06.3s/30s
+
+running (0m08.0s), 20/20 VUs, 541 complete and 0 interrupted iterations
+normal_transfer   [  24% ] 20 VUs  07.3s/30s
+
+running (0m09.0s), 20/20 VUs, 610 complete and 0 interrupted iterations
+normal_transfer   [  28% ] 20 VUs  08.3s/30s
+
+running (0m10.0s), 20/20 VUs, 704 complete and 0 interrupted iterations
+normal_transfer   [  31% ] 20 VUs  09.3s/30s
+
+running (0m11.0s), 20/20 VUs, 821 complete and 0 interrupted iterations
+normal_transfer   [  34% ] 20 VUs  10.3s/30s
+
+running (0m12.0s), 20/20 VUs, 911 complete and 0 interrupted iterations
+normal_transfer   [  38% ] 20 VUs  11.3s/30s
+
+running (0m13.0s), 20/20 VUs, 1031 complete and 0 interrupted iterations
+normal_transfer   [  41% ] 20 VUs  12.3s/30s
+
+running (0m14.0s), 20/20 VUs, 1079 complete and 0 interrupted iterations
+normal_transfer   [  44% ] 20 VUs  13.3s/30s
+
+running (0m15.0s), 20/20 VUs, 1157 complete and 0 interrupted iterations
+normal_transfer   [  48% ] 20 VUs  14.3s/30s
+
+running (0m16.0s), 20/20 VUs, 1264 complete and 0 interrupted iterations
+normal_transfer   [  51% ] 20 VUs  15.3s/30s
+
+running (0m17.0s), 20/20 VUs, 1388 complete and 0 interrupted iterations
+normal_transfer   [  54% ] 20 VUs  16.3s/30s
+
+running (0m18.0s), 20/20 VUs, 1430 complete and 0 interrupted iterations
+normal_transfer   [  58% ] 20 VUs  17.3s/30s
+
+running (0m19.0s), 20/20 VUs, 1528 complete and 0 interrupted iterations
+normal_transfer   [  61% ] 20 VUs  18.3s/30s
+
+running (0m20.0s), 20/20 VUs, 1619 complete and 0 interrupted iterations
+normal_transfer   [  64% ] 20 VUs  19.3s/30s
+
+running (0m21.0s), 20/20 VUs, 1740 complete and 0 interrupted iterations
+normal_transfer   [  68% ] 20 VUs  20.3s/30s
+
+running (0m22.0s), 20/20 VUs, 1821 complete and 0 interrupted iterations
+normal_transfer   [  71% ] 20 VUs  21.3s/30s
+
+running (0m23.0s), 20/20 VUs, 1924 complete and 0 interrupted iterations
+normal_transfer   [  74% ] 20 VUs  22.3s/30s
+
+running (0m24.0s), 20/20 VUs, 2021 complete and 0 interrupted iterations
+normal_transfer   [  78% ] 20 VUs  23.3s/30s
+
+running (0m25.0s), 20/20 VUs, 2113 complete and 0 interrupted iterations
+normal_transfer   [  81% ] 20 VUs  24.3s/30s
+
+running (0m26.0s), 20/20 VUs, 2238 complete and 0 interrupted iterations
+normal_transfer   [  84% ] 20 VUs  25.3s/30s
+
+running (0m27.0s), 20/20 VUs, 2351 complete and 0 interrupted iterations
+normal_transfer   [  88% ] 20 VUs  26.3s/30s
+
+running (0m28.0s), 20/20 VUs, 2449 complete and 0 interrupted iterations
+normal_transfer   [  91% ] 20 VUs  27.3s/30s
+
+running (0m29.0s), 20/20 VUs, 2539 complete and 0 interrupted iterations
+normal_transfer   [  94% ] 20 VUs  28.3s/30s
+
+running (0m30.0s), 20/20 VUs, 2650 complete and 0 interrupted iterations
+normal_transfer   [  98% ] 20 VUs  29.3s/30s
+time="2026-08-16T16:17:19+05:30" level=info msg="[normal-transfer] completed: 0 -> 2532 (retries: 0 -> 9574, exhausted: 0 -> 206)" source=console
+
+
+  █ THRESHOLDS 
+
+    http_req_duration
+    ✓ 'p(95)<500' p(95)=471.79ms
+
+    http_req_failed
+    ✗ 'rate<0.01' rate=7.00%
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 2940   94.989133/s
+    checks_succeeded...: 92.99% 2734 out of 2940
+    checks_failed......: 7.00%  206 out of 2940
+
+    ✓ account created (201)
+    ✓ funded (201)
+    ✓ metrics ok (200)
+    ✗ transfer succeeded (201)
+      ↳  92% — ✓ 2532 / ✗ 206
+
+    HTTP
+    http_req_duration..............: avg=111.39ms min=634µs    med=30.79ms  max=920.65ms p(90)=352.82ms p(95)=471.79ms
+      { expected_response:true }...: avg=83.11ms  min=634µs    med=22.97ms  max=901.89ms p(90)=261.6ms  p(95)=345.76ms
+    http_req_failed................: 7.00%  206 out of 2940
+    http_reqs......................: 2940   94.989133/s
+
+    EXECUTION
+    iteration_duration.............: avg=219.87ms min=107.62ms med=139.84ms max=1.02s    p(90)=461.55ms p(95)=590.36ms
+    iterations.....................: 2738   88.462668/s
+    vus............................: 20     min=20          max=20
+    vus_max........................: 20     min=20          max=20
+
+    NETWORK
+    data_received..................: 1.4 MB 45 kB/s
+    data_sent......................: 994 kB 32 kB/s
+
+
+
+
+running (0m31.0s), 00/20 VUs, 2738 complete and 0 interrupted iterations
+normal_transfer ✓ [ 100% ] 20 VUs  30s
+time="2026-08-16T16:17:19+05:30" level=error msg="thresholds on metrics 'http_req_failed' have been crossed"
