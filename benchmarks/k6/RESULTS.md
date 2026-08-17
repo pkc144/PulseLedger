@@ -139,6 +139,30 @@ exactly the sensitivity the environment note at the top of this file warns about
 conclusion is unchanged and was reproduced: under `SERIALIZABLE` contention this system degrades by
 returning bounded 503s and higher tail latency, never by losing or duplicating money.
 
+## v1.1.0 re-run (with authentication)
+
+Re-run on `528bf44` after customer authentication and account ownership landed, same host and same
+2 CPU / 2 GiB container, freshly seeded. Every scenario now provisions a principal and API key in
+`setup()` and sends a bearer token on every customer request. Raw output:
+[`results/release-v1.1.0/`](./results/release-v1.1.0/); full context in
+[docs/release/v1.1.0.md](../../docs/release/v1.1.0.md).
+
+| Scenario                 | Requests | Throughput  | p50      | p95      | `http_req_failed` | Retry-exhausted |
+| ------------------------ | -------- | ----------- | -------- | -------- | ----------------- | --------------- |
+| `normal-transfer`        | 2,498    | 79.4 req/s  | 49.4 ms  | 560.3 ms | 9.24% (231)       | 231             |
+| `duplicate-storm`        | 57       | 924 req/s   | 23.3 ms  | 32.8 ms  | 0.00% (0)         | —               |
+| `hot-account-contention` | 2,803    | 138.3 req/s | 144.9 ms | 430.4 ms | 24.79% (695)      | 695             |
+| `broad-concurrency`      | 2,888    | 55.2 req/s  | 541.5 ms | 2920 ms  | 17.10% (494)      | 494             |
+
+The invariants held with the guard on the request path: `duplicate-storm` still moved the completed
+counter by exactly 1, every contention scenario's failure count still equals its retry-exhausted
+delta exactly, and reconciliation was clean over 707 accounts after 7,369 transfer attempts.
+
+**No throughput claim is made about the cost of authentication.** It is one indexed read plus a
+SHA-256 digest per request, and this environment's run-to-run spread is larger than that by more
+than an order of magnitude — the two v1.0.0 runs above differ by 4× on `broad-concurrency`'s failure
+rate alone. Any number quoted here as "the cost of auth" would be noise with a story attached.
+
 ## Reproducing
 
 ```bash

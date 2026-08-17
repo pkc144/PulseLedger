@@ -4,7 +4,8 @@
 
 Customer-facing authentication and account ownership — the one gap that made the ledger's central
 claim hollow: money could not move _incorrectly_, but anyone who could reach the process could move
-it. Decision record: [ADR-005](./docs/adr/005-api-key-authentication-account-ownership.md).
+it. Decision record: [ADR-005](./docs/adr/005-api-key-authentication-account-ownership.md);
+verification record: [docs/release/v1.1.0.md](./docs/release/v1.1.0.md).
 
 ### Authentication
 

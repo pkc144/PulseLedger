@@ -1,0 +1,190 @@
+{
+    "metrics": {
+        "http_req_sending": {
+            "med": 0.093,
+            "max": 0.709,
+            "p(90)": 0.278,
+            "p(95)": 0.5545999999999998,
+            "avg": 0.14761403508771934,
+            "min": 0.016
+        },
+        "data_sent": {
+            "count": 21457,
+            "rate": 347842.29809032846
+        },
+        "http_req_waiting": {
+            "avg": 20.880894736842105,
+            "min": 0.269,
+            "med": 23.071,
+            "max": 33.15,
+            "p(90)": 32.2266,
+            "p(95)": 32.6678
+        },
+        "http_req_receiving": {
+            "p(95)": 0.11639999999999998,
+            "avg": 0.0744736842105263,
+            "min": 0.035,
+            "med": 0.066,
+            "max": 0.201,
+            "p(90)": 0.1122
+        },
+        "http_req_duration": {
+            "med": 23.314,
+            "max": 33.224,
+            "p(90)": 32.4246,
+            "p(95)": 32.762,
+            "avg": 21.10298245614035,
+            "min": 0.327
+        },
+        "http_req_duration{expected_response:true}": {
+            "med": 23.314,
+            "max": 33.224,
+            "p(90)": 32.4246,
+            "p(95)": 32.762,
+            "avg": 21.10298245614035,
+            "min": 0.327
+        },
+        "data_received": {
+            "count": 22341,
+            "rate": 362172.9403754499
+        },
+        "checks": {
+            "passes": 57,
+            "fails": 0,
+            "value": 1
+        },
+        "http_req_connecting": {
+            "med": 0.712,
+            "max": 1.097,
+            "p(90)": 1.0002,
+            "p(95)": 1.0417999999999998,
+            "avg": 0.677,
+            "min": 0
+        },
+        "http_reqs": {
+            "count": 57,
+            "rate": 924.0346269818111
+        },
+        "http_req_tls_handshaking": {
+            "p(90)": 0,
+            "p(95)": 0,
+            "avg": 0,
+            "min": 0,
+            "med": 0,
+            "max": 0
+        },
+        "iteration_duration": {
+            "avg": 24.850973340000007,
+            "min": 12.886817,
+            "med": 26.29918,
+            "max": 34.101912,
+            "p(90)": 33.519523400000004,
+            "p(95)": 33.6655475
+        },
+        "http_req_failed": {
+            "passes": 0,
+            "fails": 57,
+            "thresholds": {
+                "rate<0.01": false
+            },
+            "value": 0
+        },
+        "iterations": {
+            "count": 50,
+            "rate": 810.5566903349221
+        },
+        "http_req_blocked": {
+            "avg": 0.7847719298245611,
+            "min": 0.003,
+            "med": 0.774,
+            "max": 2.828,
+            "p(90)": 1.0786,
+            "p(95)": 1.1516
+        }
+    },
+    "setup_data": {
+        "apiKey": "pl_live_P4bfe3OKdK4C0zhnbeciCXFbUKrNvRnCOgXlkVkl1d0",
+        "before": {
+            "exhausted": 231,
+            "retries": 8965,
+            "completed": 2063
+        },
+        "destination": "afe83d4c-6df3-4d5f-984a-52d0765d9b6e",
+        "idempotencyKey": "duplicate-storm-1786971417521",
+        "source": "d848cb87-31ae-4391-ac18-9f84353f97eb"
+    },
+    "root_group": {
+        "checks": {
+            "got 201 (won the race) or 409 (correctly rejected)": {
+                "name": "got 201 (won the race) or 409 (correctly rejected)",
+                "path": "::got 201 (won the race) or 409 (correctly rejected)",
+                "id": "545b5deae006a45780e89cbdd8446dbc",
+                "passes": 50,
+                "fails": 0
+            }
+        },
+        "name": "",
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e",
+        "groups": {
+            "setup": {
+                "name": "setup",
+                "path": "::setup",
+                "id": "5c0f8025f7e0b6654089e5b00e950f1a",
+                "groups": {},
+                "checks": {
+                        "principal created (201)": {
+                            "id": "d77dd1eb8aa62efcefc1a816037f657b",
+                            "passes": 1,
+                            "fails": 0,
+                            "name": "principal created (201)",
+                            "path": "::setup::principal created (201)"
+                        },
+                        "api key issued (201)": {
+                            "name": "api key issued (201)",
+                            "path": "::setup::api key issued (201)",
+                            "id": "59343172cdeb4dafd36cc0bd26680061",
+                            "passes": 1,
+                            "fails": 0
+                        },
+                        "account created (201)": {
+                            "name": "account created (201)",
+                            "path": "::setup::account created (201)",
+                            "id": "563590ec7251b28839b43a6f7b7f4c0a",
+                            "passes": 2,
+                            "fails": 0
+                        },
+                        "funded (201)": {
+                            "fails": 0,
+                            "name": "funded (201)",
+                            "path": "::setup::funded (201)",
+                            "id": "2feaa273242a34c19ae70613faa56326",
+                            "passes": 1
+                        },
+                        "metrics ok (200)": {
+                            "id": "32ea4d525f685d282c9c647ea1da5d0d",
+                            "passes": 1,
+                            "fails": 0,
+                            "name": "metrics ok (200)",
+                            "path": "::setup::metrics ok (200)"
+                        }
+                    }
+            },
+            "teardown": {
+                "checks": {
+                    "metrics ok (200)": {
+                        "fails": 0,
+                        "name": "metrics ok (200)",
+                        "path": "::teardown::metrics ok (200)",
+                        "id": "88489c169e4a4a50762a5b5be8cc5e2d",
+                        "passes": 1
+                    }
+                },
+                "name": "teardown",
+                "path": "::teardown",
+                "id": "a8a9942382e8ffe2e56ef29e664b8229",
+                "groups": {}
+            }
+        }
+    }
+}

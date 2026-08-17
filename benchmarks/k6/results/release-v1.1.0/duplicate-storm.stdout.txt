@@ -1,0 +1,56 @@
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+
+     execution: local
+        script: benchmarks/k6/duplicate-storm.js
+        output: -
+
+     scenarios: (100.00%) 1 scenario, 50 max VUs, 1m0s max duration (incl. graceful stop):
+              * duplicate_storm: 1 iterations for each of 50 VUs (maxDuration: 30s, gracefulStop: 30s)
+
+time="2026-08-17T18:26:57+05:30" level=info msg="[duplicate-storm] 50 concurrent identical requests -> completed delta = 1 (must be exactly 1)" source=console
+
+
+  █ THRESHOLDS 
+
+    http_req_failed
+    ✓ 'rate<0.01' rate=0.00%
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 57      924.034627/s
+    checks_succeeded...: 100.00% 57 out of 57
+    checks_failed......: 0.00%   0 out of 57
+
+    ✓ principal created (201)
+    ✓ api key issued (201)
+    ✓ account created (201)
+    ✓ funded (201)
+    ✓ metrics ok (200)
+    ✓ got 201 (won the race) or 409 (correctly rejected)
+
+    HTTP
+    http_req_duration..............: avg=21.1ms  min=327µs   med=23.31ms max=33.22ms p(90)=32.42ms p(95)=32.76ms
+      { expected_response:true }...: avg=21.1ms  min=327µs   med=23.31ms max=33.22ms p(90)=32.42ms p(95)=32.76ms
+    http_req_failed................: 0.00% 0 out of 57
+    http_reqs......................: 57    924.034627/s
+
+    EXECUTION
+    iteration_duration.............: avg=24.85ms min=12.88ms med=26.29ms max=34.1ms  p(90)=33.51ms p(95)=33.66ms
+    iterations.....................: 50    810.55669/s
+
+    NETWORK
+    data_received..................: 22 kB 362 kB/s
+    data_sent......................: 22 kB 348 kB/s
+
+
+
+
+running (0m00.1s), 00/50 VUs, 50 complete and 0 interrupted iterations
+duplicate_storm ✓ [ 100% ] 50 VUs  00.0s/30s  50/50 iters, 1 per VU
