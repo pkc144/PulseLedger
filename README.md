@@ -11,33 +11,44 @@ benchmark artifact committed in this repository.
 
 ## What this proves
 
-Four invariants, each enforced by PostgreSQL rather than by application code alone, and each with a
+Five invariants, each enforced by PostgreSQL rather than by application code alone, and each with a
 named automated test.
 
-| #   | Invariant                                                   | Mechanism                                                                         | Proof                                                                                                       |
-| --- | ----------------------------------------------------------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| 1   | Every ledger transaction is balanced: debits equal credits  | Deferred constraint triggers verify totals at `COMMIT`; composite currency FKs    | `rejects an unbalanced transaction atomically at commit` · `accepts generated balanced postings` (property) |
-| 2   | Committed journal entries are immutable and authoritative   | `BEFORE UPDATE OR DELETE` triggers; corrections are reversing postings            | `rejects journal updates and deletes` · `reports a mismatch and does not repair it when the cache drifts`   |
-| 3   | One idempotency key means one request and one stable result | Unique `(key, operation)` claim; the response commits with the transfer           | `handles 50 concurrent identical requests creating exactly one transfer`                                    |
-| 4   | Each outbox event produces at most one logical effect       | Event written inside the transfer's transaction; consumer inbox dedups redelivery | `processes 1,000 duplicate deliveries of the same event into exactly one audit effect`                      |
+| #   | Invariant                                                   | Mechanism                                                                              | Proof                                                                                                       |
+| --- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| 1   | Every ledger transaction is balanced: debits equal credits  | Deferred constraint triggers verify totals at `COMMIT`; composite currency FKs         | `rejects an unbalanced transaction atomically at commit` · `accepts generated balanced postings` (property) |
+| 2   | Committed journal entries are immutable and authoritative   | `BEFORE UPDATE OR DELETE` triggers; corrections are reversing postings                 | `rejects journal updates and deletes` · `reports a mismatch and does not repair it when the cache drifts`   |
+| 3   | One idempotency key means one request and one stable result | Unique `(principal_id, key, operation)` claim; the response commits with the transfer  | `handles 50 concurrent identical requests creating exactly one transfer`                                    |
+| 4   | Each outbox event produces at most one logical effect       | Event written inside the transfer's transaction; consumer inbox dedups redelivery      | `processes 1,000 duplicate deliveries of the same event into exactly one audit effect`                      |
+| 5   | You can only see and spend your own money                   | Hashed API keys; immutable `owner_principal_id` constraint, checked under the row lock | `refuses to spend from an account the caller does not own, and posts nothing`                               |
 
 Full mapping, including the concurrency and recovery matrix: [docs/TESTING.md](./docs/TESTING.md).
 
 ## Evidence
 
+Measured on the `v1.1.0` tag, with authentication on the request path
+([full record](./docs/release/v1.1.0.md)).
+
 | Evidence                    | Result                                                                                                                     |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | Automated tests             | **151 passing** — 54 unit, 2 property, 95 integration against real PostgreSQL (`npm test`)                                 |
-| Concurrency under real load | ~14,000 transfer attempts across 4 k6 scenarios; **zero** overdrafts, lost updates, or unbalanced transactions             |
-| Reconciliation after load   | `{ "accountsChecked": 763, "issues": [], "ok": true }` — every cached balance matched the journal exactly                  |
-| Baseline throughput         | 4,129 requests, 134.4 req/s, p50 13.1 ms, p95 269.7 ms (20 VUs, 2-vCPU PostgreSQL container)                               |
-| Observed bottleneck         | `SERIALIZABLE` conflict retries competing for capped database CPU — 16.9% bounded 503s at 75 VUs, reported, not tuned away |
+| Concurrency under real load | 7,369 transfer attempts across 4 k6 scenarios; **zero** overdrafts, lost updates, or unbalanced transactions               |
+| Reconciliation after load   | `{ "accountsChecked": 707, "issues": [], "ok": true }` — every cached balance matched the journal exactly                  |
+| Baseline throughput         | 2,498 requests, 79.4 req/s, p50 49.4 ms, p95 560 ms (20 VUs, 2-vCPU PostgreSQL container)                                  |
+| Observed bottleneck         | `SERIALIZABLE` conflict retries competing for capped database CPU — 17.1% bounded 503s at 75 VUs, reported, not tuned away |
 | Idempotency at load         | 50 truly concurrent identical requests → completed-transfer counter moved by **exactly 1**                                 |
+| Failure accounting          | In every contention scenario the non-2xx count equals the retry-exhausted count **exactly** — nothing else fails quietly   |
 | Failure mode under stress   | `TRANSFER_RETRY_EXHAUSTED` (503) after 12 bounded retries — the system refuses to trade correctness for throughput         |
 | Crash recovery              | Process `SIGKILL`ed between commit and delivery; on restart the event is delivered and produces exactly one effect         |
+| Access control              | A valid key for another principal gets `404` on read, entries, spend, and transfer read; the balance does not move         |
+| Secrets at rest             | 0 rows in `api_keys` match a raw secret — only a SHA-256 hash and a 12-character lookup prefix are stored                  |
 
-Methodology, hardware, and raw k6 output: [benchmarks/k6/RESULTS.md](./benchmarks/k6/RESULTS.md).
-Reproduce the crash-recovery and idempotency results in ~8 seconds with `./scripts/demo.sh`.
+No throughput claim is made about the cost of authentication: it is one indexed read plus a digest
+per request, and this machine's run-to-run spread is larger than that by more than an order of
+magnitude. Earlier runs at larger scale (~14,000 attempts, 763 accounts reconciled) are kept in
+[benchmarks/k6/RESULTS.md](./benchmarks/k6/RESULTS.md) alongside the methodology, hardware, and raw
+k6 output. Reproduce the crash-recovery, idempotency, and ownership results in ~8 seconds with
+`./scripts/demo.sh`.
 
 ## Quick start
 
