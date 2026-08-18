@@ -5,7 +5,7 @@ run at once, clients retry, and the server is killed mid-transaction.**
 
 A ledger is the component inside a bank or payments company that actually moves money between
 accounts. If it gets a single transfer wrong, someone's balance is wrong and nobody can tell which
-one. This project treats that correctness as the feature, and **proves it** — with 169 automated
+one. This project treats that correctness as the feature, and **proves it** — with 171 automated
 tests, real load runs, and published evidence for every claim.
 
 **Built with:** TypeScript · Node.js 22 · Fastify · PostgreSQL 17 · Docker · GitHub Actions ·
@@ -26,7 +26,7 @@ so even a defect in the application code cannot write an invalid balance.
 
 ## Proof, not claims
 
-- **169 automated tests** — unit, property-based, and integration tests against a real PostgreSQL
+- **171 automated tests** — unit, property-based, and integration tests against a real PostgreSQL
 - **~7,400 transfer attempts under real load**, with **zero** overdrafts and **zero** balance drift
 - **50 simultaneous duplicate requests → exactly 1 payment posted**
 - **Process killed mid-flight → the event survived and produced exactly one effect after restart**
@@ -75,7 +75,7 @@ have produced a comparison, not a measurement.
 
 | Evidence                      | Result                                                                                                                     |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Automated tests               | **169 passing** — 58 unit, 2 property, 109 integration against real PostgreSQL (`npm test`)                                |
+| Automated tests               | **171 passing** — 60 unit, 2 property, 109 integration against real PostgreSQL (`npm test`)                                |
 | Concurrency under real load ¹ | 7,369 transfer attempts across 4 k6 scenarios; **zero** overdrafts, lost updates, or unbalanced transactions               |
 | Reconciliation after load ¹   | `{ "accountsChecked": 707, "issues": [], "ok": true }` — every cached balance matched the journal exactly                  |
 | Baseline throughput ¹         | 2,498 requests, 79.4 req/s, p50 49.4 ms, p95 560 ms (20 VUs, 2-vCPU PostgreSQL container)                                  |
@@ -140,7 +140,7 @@ curl -s localhost:3000/health/ready
 Run the whole verification gate the way CI does:
 
 ```bash
-npm run check      # architecture → lint → typecheck → 169 tests → build
+npm run check      # architecture → lint → typecheck → 171 tests → build
 ```
 
 ## Move some money
@@ -251,8 +251,8 @@ Decision records:
 ```bash
 npm run dev                # watch mode
 npm run check              # architecture + lint + typecheck + tests + build (the local gate)
-npm test                   # 169 tests (Testcontainers starts PostgreSQL if needed)
-npm run test:unit          # 58 tests, no database
+npm test                   # 171 tests (Testcontainers starts PostgreSQL if needed)
+npm run test:unit          # 60 tests, no database
 npm run test:integration   # 109 tests against real PostgreSQL
 npm run db:migrate         # apply pending migrations
 npm run reconcile          # recompute balances from the journal; non-zero exit on drift

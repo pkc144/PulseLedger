@@ -20,8 +20,8 @@ named test that proves it.
 
 | Command                                                       | Scope                               | Needs PostgreSQL |
 | ------------------------------------------------------------- | ----------------------------------- | ---------------- |
-| `npm test`                                                    | Everything — 169 tests in 18 files  | yes              |
-| `npm run test:unit`                                           | 58 unit tests, in-memory ports only | no               |
+| `npm test`                                                    | Everything — 171 tests in 19 files  | yes              |
+| `npm run test:unit`                                           | 60 unit tests, in-memory ports only | no               |
 | `npm run test:integration`                                    | 109 tests against real PostgreSQL   | yes              |
 | `npx vitest run tests/property`                               | 2 property tests (fast-check)       | no               |
 | `npx vitest run tests/integration/outbox.integration.test.ts` | One file                            | yes              |
@@ -111,11 +111,11 @@ same suite as a local `npm test` rather than a differently-isolated variant of i
 
 ## Test inventory
 
-169 tests, 18 files.
+171 tests, 19 files.
 
 | Layer       | Files | Tests | What it proves                                                             |
 | ----------- | ----: | ----: | -------------------------------------------------------------------------- |
-| Unit        |     7 |    58 | Domain and application behavior through in-memory ports; no database       |
+| Unit        |     8 |    60 | Domain and application behavior through in-memory ports; no database       |
 | Property    |     1 |     2 | Generated postings: balanced always accepted, unequal always rejected      |
 | Integration |    10 |   109 | Real migrations, real SQL, real constraints, real concurrency and recovery |
 

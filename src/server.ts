@@ -7,7 +7,13 @@ import { PostgresOutboxStore } from './modules/outbox/outbox-repository.js';
 import { OutboxWorker } from './modules/outbox/outbox-worker.js';
 
 const config = loadConfig();
-const pool = createPool(config.databaseUrl);
+// The logger does not exist yet, so the pool is created with a placeholder that is replaced with
+// real logging as soon as the app is built. What matters from this line onward is that a listener
+// exists at all: an idle-client error with none would end the process.
+let logIdleClientError: (error: Error) => void = () => undefined;
+const pool = createPool(config.databaseUrl, {
+  onIdleClientError: (error) => logIdleClientError(error),
+});
 const outboxStore = new PostgresOutboxStore(pool, {
   claimLeaseSeconds: config.outbox.claimLeaseSeconds,
 });
@@ -19,6 +25,8 @@ const app = await buildApp({
   outboxStore,
   requestLimits: config.requestLimits,
 });
+
+logIdleClientError = (err) => app.log.error({ err }, 'idle database client dropped by PostgreSQL');
 
 const worker = new OutboxWorker(outboxStore, {
   batchSize: config.outbox.batchSize,

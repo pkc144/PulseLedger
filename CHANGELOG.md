@@ -12,6 +12,12 @@ Documentation and configuration patch. **No application logic changed.** Verific
   take precedence, so Docker and CI are unaffected.
 - Earlier clean-clone checks missed this because their scripts exported the variables themselves —
   they proved the steps work, not the documented environment handling.
+- **Fixed a process-level crash.** `pg.Pool` emits `error` for idle clients and `createPool`
+  attached no listener — so a PostgreSQL restart, failover, or `pg_terminate_backend` on one idle
+  connection would take down the whole ledger process, with every in-flight transaction healthy.
+  A handler is now always attached and routed to the application logger. Surfaced by CI reporting
+  169 passing tests and still failing, on an unhandled `57P01`; the same cause had been recorded as
+  an intermittent test flake in earlier release notes.
 - README rewritten with a plain-language opening: what a ledger is, the four hard problems this
   solves and what goes wrong without each, the evidence at a glance, and a copy-paste demo. The
   engineering material is unchanged, under "For engineers".
