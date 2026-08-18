@@ -1,16 +1,53 @@
 # PulseLedger
 
-A correctness-first double-entry payment ledger that stays right when transfers run concurrently,
-clients retry, and background workers crash mid-flight.
+**A payment ledger that never loses, duplicates, or invents money — even when thousands of transfers
+run at once, clients retry, and the server is killed mid-transaction.**
 
-TypeScript · Fastify · PostgreSQL 17 · one deployable process · no broker, no cache, no ORM.
+A ledger is the component inside a bank or payments company that actually moves money between
+accounts. If it gets a single transfer wrong, someone's balance is wrong and nobody can tell which
+one. This project treats that correctness as the feature, and **proves it** — with 169 automated
+tests, real load runs, and published evidence for every claim.
 
-**Status: `v1.2.0`.** Feature-complete against [PROJECT_PLAN.md](./PROJECT_PLAN.md), plus API-key
-authentication with account ownership (`v1.1.0`) and an operational surface — dead-letter replay,
-retention, and metrics (`v1.2.0`). Every claim below is backed by a test you can run or an artifact
-committed in this repository.
+**Built with:** TypeScript · Node.js 22 · Fastify · PostgreSQL 17 · Docker · GitHub Actions ·
+Vitest · fast-check · k6 · Testcontainers
 
-## What this proves
+## The four hard problems it solves
+
+| The problem                                           | What goes wrong without a fix                          | How PulseLedger handles it                                                        |
+| ----------------------------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| Two transfers spend the same balance at the same time | The account goes negative — money appears from nowhere | Serializable database transactions with a fixed lock order and bounded retries    |
+| A client times out and retries the same payment       | The customer is charged twice                          | Idempotency keys: one key means one payment, and a retry replays the first answer |
+| The server dies after taking the money                | The rest of the system never hears about the payment   | The event is written **inside** the same transaction, then delivered by a worker  |
+| A stored balance drifts from the transaction history  | The books are quietly wrong and nobody notices         | Reconciliation recomputes every balance from the immutable history and compares   |
+
+Money is stored as whole integers (never floating point), history can never be edited — corrections
+are new entries, the way real accounting works — and the rules are enforced by **PostgreSQL itself**,
+so even a defect in the application code cannot write an invalid balance.
+
+## Proof, not claims
+
+- **169 automated tests** — unit, property-based, and integration tests against a real PostgreSQL
+- **~7,400 transfer attempts under real load**, with **zero** overdrafts and **zero** balance drift
+- **50 simultaneous duplicate requests → exactly 1 payment posted**
+- **Process killed mid-flight → the event survived and produced exactly one effect after restart**
+- Load tests that report the system's **own bottleneck** rather than a flattering number
+- 4 released versions, 6 architecture decision records, and a written verification record per release
+
+## See it for yourself in ~8 seconds
+
+```bash
+cp .env.example .env                 # defaults already point at the Docker database
+docker compose up -d postgres && npm ci && npm run db:migrate && npm run build
+ADMIN_API_KEY=$(grep ADMIN_API_KEY .env | cut -d= -f2) ./scripts/demo.sh
+```
+
+That script creates accounts, moves money, fires 50 simultaneous duplicate payments to show only one
+lands, **kills the process mid-transaction** and restarts it to show nothing was lost, proves another
+user cannot touch your account, and finishes by re-checking every balance against the history.
+
+---
+
+## For engineers: what this proves
 
 Five invariants, each enforced by PostgreSQL rather than by application code alone, and each with a
 named automated test.
@@ -24,6 +61,10 @@ named automated test.
 | 5   | You can only see and spend your own money                   | Hashed API keys; immutable `owner_principal_id` constraint, checked under the row lock | `refuses to spend from an account the caller does not own, and posts nothing`                               |
 
 Full mapping, including the concurrency and recovery matrix: [docs/TESTING.md](./docs/TESTING.md).
+
+**Status: `v1.2.0`.** Feature-complete against [PROJECT_PLAN.md](./PROJECT_PLAN.md), plus API-key
+authentication with account ownership (`v1.1.0`) and an operational surface — dead-letter replay,
+retention, and metrics (`v1.2.0`).
 
 ## Evidence
 
@@ -71,6 +112,9 @@ docker compose up -d postgres
 npm run db:migrate
 npm run dev                                # http://localhost:3000
 ```
+
+Every command reads `.env` automatically (Node's `--env-file-if-exists`), so nothing needs exporting.
+Real environment variables still win, which is how the container and CI supply configuration.
 
 Customer routes require an API key, issued by an administrator:
 
