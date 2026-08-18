@@ -5,9 +5,10 @@ clients retry, and background workers crash mid-flight.
 
 TypeScript · Fastify · PostgreSQL 17 · one deployable process · no broker, no cache, no ORM.
 
-**Status: `v1.1.0`.** Feature-complete against [PROJECT_PLAN.md](./PROJECT_PLAN.md), plus API-key
-authentication and account ownership; every claim below is backed by a test you can run or a
-benchmark artifact committed in this repository.
+**Status: `v1.2.0`.** Feature-complete against [PROJECT_PLAN.md](./PROJECT_PLAN.md), plus API-key
+authentication with account ownership (`v1.1.0`) and an operational surface — dead-letter replay,
+retention, and metrics (`v1.2.0`). Every claim below is backed by a test you can run or an artifact
+committed in this repository.
 
 ## What this proves
 
@@ -26,22 +27,30 @@ Full mapping, including the concurrency and recovery matrix: [docs/TESTING.md](.
 
 ## Evidence
 
-Measured on the `v1.1.0` tag, with authentication on the request path
-([full record](./docs/release/v1.1.0.md)).
+Verified on the `v1.2.0` tag ([full record](./docs/release/v1.2.0.md)). The load figures are carried
+forward from the [`v1.1.0` run](./docs/release/v1.1.0.md#benchmarks) and labelled as such: `v1.2.0`
+adds operator tooling and changes nothing on the transfer path, so re-running the scenarios would
+have produced a comparison, not a measurement.
 
-| Evidence                    | Result                                                                                                                     |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Automated tests             | **169 passing** — 58 unit, 2 property, 109 integration against real PostgreSQL (`npm test`)                                |
-| Concurrency under real load | 7,369 transfer attempts across 4 k6 scenarios; **zero** overdrafts, lost updates, or unbalanced transactions               |
-| Reconciliation after load   | `{ "accountsChecked": 707, "issues": [], "ok": true }` — every cached balance matched the journal exactly                  |
-| Baseline throughput         | 2,498 requests, 79.4 req/s, p50 49.4 ms, p95 560 ms (20 VUs, 2-vCPU PostgreSQL container)                                  |
-| Observed bottleneck         | `SERIALIZABLE` conflict retries competing for capped database CPU — 17.1% bounded 503s at 75 VUs, reported, not tuned away |
-| Idempotency at load         | 50 truly concurrent identical requests → completed-transfer counter moved by **exactly 1**                                 |
-| Failure accounting          | In every contention scenario the non-2xx count equals the retry-exhausted count **exactly** — nothing else fails quietly   |
-| Failure mode under stress   | `TRANSFER_RETRY_EXHAUSTED` (503) after 12 bounded retries — the system refuses to trade correctness for throughput         |
-| Crash recovery              | Process `SIGKILL`ed between commit and delivery; on restart the event is delivered and produces exactly one effect         |
-| Access control              | A valid key for another principal gets `404` on read, entries, spend, and transfer read; the balance does not move         |
-| Secrets at rest             | 0 rows in `api_keys` match a raw secret — only a SHA-256 hash and a 12-character lookup prefix are stored                  |
+| Evidence                      | Result                                                                                                                     |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Automated tests               | **169 passing** — 58 unit, 2 property, 109 integration against real PostgreSQL (`npm test`)                                |
+| Concurrency under real load ¹ | 7,369 transfer attempts across 4 k6 scenarios; **zero** overdrafts, lost updates, or unbalanced transactions               |
+| Reconciliation after load ¹   | `{ "accountsChecked": 707, "issues": [], "ok": true }` — every cached balance matched the journal exactly                  |
+| Baseline throughput ¹         | 2,498 requests, 79.4 req/s, p50 49.4 ms, p95 560 ms (20 VUs, 2-vCPU PostgreSQL container)                                  |
+| Observed bottleneck ¹         | `SERIALIZABLE` conflict retries competing for capped database CPU — 17.1% bounded 503s at 75 VUs, reported, not tuned away |
+| Idempotency at load ¹         | 50 truly concurrent identical requests → completed-transfer counter moved by **exactly 1**                                 |
+| Failure accounting ¹          | In every contention scenario the non-2xx count equals the retry-exhausted count **exactly** — nothing else fails quietly   |
+| Failure mode under stress     | `TRANSFER_RETRY_EXHAUSTED` (503) after 12 bounded retries — the system refuses to trade correctness for throughput         |
+| Crash recovery                | Process `SIGKILL`ed between commit and delivery; on restart the event is delivered and produces exactly one effect         |
+| Access control                | A valid key for another principal gets `404` on read, entries, spend, and transfer read; the balance does not move         |
+| Secrets at rest               | 0 rows in `api_keys` match a raw secret — only a SHA-256 hash and a 12-character lookup prefix are stored                  |
+| Dead-letter recovery          | A parked event replays with a fresh budget, keeps its `last_error`, and re-enters the worker's claim query                 |
+| Retention boundary            | Processed rows sweep in bounded batches; `DELETE` on `consumer_inbox` / `audit_effects` is **rejected by the database**    |
+| Observability                 | `GET /metrics` (admin-only) exposes transfer counters and `pulseledger_outbox_events{status}` in Prometheus format         |
+| Clean clone                   | Fresh checkout of the tag: 10 migrations, 3 retention indexes, both CLIs and `/metrics` exercised end to end               |
+
+¹ measured on `v1.1.0`; the transfer path is byte-identical in `v1.2.0`.
 
 No throughput claim is made about the cost of authentication: it is one indexed read plus a digest
 per request, and this machine's run-to-run spread is larger than that by more than an order of
