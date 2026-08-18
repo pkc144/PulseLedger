@@ -144,4 +144,27 @@ export class PostgresIdempotencyStore implements IdempotencyStore {
       ],
     );
   }
+
+  public async purgeCompletedBefore(cutoff: Date, batchSize: number): Promise<number> {
+    // A completed record's only remaining job is to replay a response to a client that retries.
+    // Past the retention window that replay is no longer expected, and the row is dead weight --
+    // but deleting an `in_progress` row would hand a duplicate request a clean claim, so those
+    // are never eligible regardless of age.
+    let removed = 0;
+    for (;;) {
+      const result = await this.database.query(
+        `DELETE FROM idempotency_records
+         WHERE ctid IN (
+           SELECT ctid FROM idempotency_records
+           WHERE status = 'completed' AND completed_at < $1
+           ORDER BY completed_at
+           LIMIT $2
+         )`,
+        [cutoff.toISOString(), batchSize],
+      );
+      const deleted = result.rowCount ?? 0;
+      removed += deleted;
+      if (deleted < batchSize) return removed;
+    }
+  }
 }

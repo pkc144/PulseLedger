@@ -88,6 +88,12 @@ class FakeIdempotencyStore implements IdempotencyStore {
     }
   }
 
+  public async purgeCompletedBefore(): Promise<number> {
+    // Retention has its own integration coverage against real SQL; the service under test here
+    // never calls it.
+    return 0;
+  }
+
   public getRecord(
     key: string,
     operation: string,

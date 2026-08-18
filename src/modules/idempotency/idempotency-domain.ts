@@ -48,6 +48,12 @@ export interface IdempotencyStore {
     responseBody: unknown;
     responseStatus: number;
   }): Promise<void>;
+
+  /**
+   * Deletes completed records older than the cutoff, in bounded batches. Only completed records
+   * are eligible: an `in_progress` row may still be reclaimed by a retrying caller.
+   */
+  purgeCompletedBefore(cutoff: Date, batchSize: number): Promise<number>;
 }
 
 export interface IdempotencyApplication {

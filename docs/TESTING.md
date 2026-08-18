@@ -20,9 +20,9 @@ named test that proves it.
 
 | Command                                                       | Scope                               | Needs PostgreSQL |
 | ------------------------------------------------------------- | ----------------------------------- | ---------------- |
-| `npm test`                                                    | Everything — 151 tests in 16 files  | yes              |
-| `npm run test:unit`                                           | 54 unit tests, in-memory ports only | no               |
-| `npm run test:integration`                                    | 95 tests against real PostgreSQL    | yes              |
+| `npm test`                                                    | Everything — 169 tests in 18 files  | yes              |
+| `npm run test:unit`                                           | 58 unit tests, in-memory ports only | no               |
+| `npm run test:integration`                                    | 109 tests against real PostgreSQL   | yes              |
 | `npx vitest run tests/property`                               | 2 property tests (fast-check)       | no               |
 | `npx vitest run tests/integration/outbox.integration.test.ts` | One file                            | yes              |
 | `npx vitest run -t 'never lets two workers double-claim'`     | One test by name                    | yes              |
@@ -48,12 +48,23 @@ first test runs.
 
 ### Operational commands
 
-| Command                                              | What it does                                                         |
-| ---------------------------------------------------- | -------------------------------------------------------------------- |
-| `npm run db:migrate`                                 | Applies pending SQL migrations in order, transactionally             |
-| `npm run reconcile`                                  | Recomputes balances from the journal; exits non-zero on any issue    |
-| `SEED_ACCOUNTS=300 SEED_TRANSFERS=3000 npm run seed` | Builds a realistic dataset through the real services (never raw SQL) |
-| `./scripts/demo.sh`                                  | Runs the full four-invariant demonstration (~8 s)                    |
+| Command                                              | What it does                                                                     |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `npm run db:migrate`                                 | Applies pending SQL migrations in order, transactionally                         |
+| `npm run reconcile`                                  | Recomputes balances from the journal; exits non-zero on any issue                |
+| `SEED_ACCOUNTS=300 SEED_TRANSFERS=3000 npm run seed` | Builds a realistic dataset through the real services (never raw SQL)             |
+| `./scripts/demo.sh`                                  | Runs the full four-invariant demonstration (~8 s)                                |
+| `npm run outbox list`                                | Lists parked events — those that exhausted their attempt budget                  |
+| `npm run outbox show <id>`                           | Prints one event in full, including payload and last error                       |
+| `npm run outbox replay <id>`                         | Returns a parked event to the queue with a fresh budget                          |
+| `npm run outbox -- replay --all`                     | Returns every parked event (note the `--`, so npm passes the flag)               |
+| `npm run retention -- --dry-run`                     | Counts what a sweep would delete, using the sweep's own predicates               |
+| `npm run retention`                                  | Deletes processed outbox events (>30 d) and completed idempotency records (>7 d) |
+
+Flags need `npm run <script> -- --flag`; bare subcommands (`npm run outbox list`) pass through as-is.
+Retention windows are tunable: `npm run retention -- --outbox-days 14 --idempotency-days 3`.
+`consumer_inbox` and `audit_effects` are never swept — see
+[ADR-006](./adr/006-retention-boundaries-and-operator-replay.md).
 
 ### Benchmarks
 
@@ -100,13 +111,13 @@ same suite as a local `npm test` rather than a differently-isolated variant of i
 
 ## Test inventory
 
-151 tests, 16 files.
+169 tests, 18 files.
 
 | Layer       | Files | Tests | What it proves                                                             |
 | ----------- | ----: | ----: | -------------------------------------------------------------------------- |
-| Unit        |     6 |    54 | Domain and application behavior through in-memory ports; no database       |
+| Unit        |     7 |    58 | Domain and application behavior through in-memory ports; no database       |
 | Property    |     1 |     2 | Generated postings: balanced always accepted, unequal always rejected      |
-| Integration |     9 |    95 | Real migrations, real SQL, real constraints, real concurrency and recovery |
+| Integration |    10 |   109 | Real migrations, real SQL, real constraints, real concurrency and recovery |
 
 Concurrency, recovery, and end-to-end cases live inside `tests/integration/` rather than separate
 directories: they need the same real database, and splitting them would have meant duplicating the
