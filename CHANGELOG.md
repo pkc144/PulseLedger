@@ -5,7 +5,8 @@
 Operational surface: the three things a reviewer asks about after the correctness story — what
 happens to an event that fails for good, what stops the tables growing forever, and how you would
 see any of it from outside the process. Decision record:
-[ADR-006](./docs/adr/006-retention-boundaries-and-operator-replay.md).
+[ADR-006](./docs/adr/006-retention-boundaries-and-operator-replay.md); verification record:
+[docs/release/v1.2.0.md](./docs/release/v1.2.0.md).
 
 ### Dead-letter inspection and replay
 

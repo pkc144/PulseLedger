@@ -258,6 +258,6 @@ docs/                      ARCHITECTURE · API · TESTING · TRADEOFFS · DEMO �
 
 - [docs/DEMO.md](./docs/DEMO.md) — the three-minute walkthrough, timed
 - [PROJECT_PLAN.md](./PROJECT_PLAN.md) — the eight-week plan, gates, and progress tracker
-- [docs/release/v1.1.0.md](./docs/release/v1.1.0.md) — current release verification record
-- [docs/release/v1.0.0.md](./docs/release/v1.0.0.md) — the v1.0.0 record it builds on
+- [docs/release/v1.2.0.md](./docs/release/v1.2.0.md) — current release verification record
+- [docs/release/v1.1.0.md](./docs/release/v1.1.0.md) · [v1.0.0](./docs/release/v1.0.0.md) — the records it builds on
 - [docs/weeks-1-2-study-guide.md](./docs/weeks-1-2-study-guide.md) — background notes
