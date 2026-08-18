@@ -246,6 +246,27 @@ journal_entries * -------- 1 ledger_transactions 1 -------- 0..1 transfers
 - Request size, connection, keep-alive, and total-request timeouts are explicit Fastify constructor options (`bodyLimit`, `connectionTimeout`, `keepAliveTimeout`, `requestTimeout`), configurable via `REQUEST_BODY_LIMIT_BYTES`/`CONNECTION_TIMEOUT_MS`/`KEEP_ALIVE_TIMEOUT_MS`/`REQUEST_TIMEOUT_MS` with bounded defaults rather than Fastify's larger built-in defaults.
 - Shutdown closes the outbox worker, then the Fastify server (which stops accepting new connections and drains in-flight ones; Fastify's default `return503OnClosing` answers any request that still arrives mid-shutdown with 503), then the database pool — verified with a real listening socket in `tests/integration/hardening.integration.test.ts`, not just `app.inject()`.
 
+### Current operational surface
+
+Three operator-facing capabilities sit outside the request path and share the same rule: they act
+only on terminal state, never on work the system still owes.
+
+- **Dead-letter inspection and replay** (`npm run outbox`). Events that exhaust their attempt budget
+  are parked (`status = 'failed'`, `next_attempt_at = 'infinity'`) rather than dropped. `OutboxAdminStore`
+  is a port separate from `OutboxStore` so the worker's hot path cannot reach inspection or replay.
+  Replay resets `attempts` and clears `next_attempt_at` — making the row claimable by the ordinary
+  claim query again — while keeping `last_error` as the record of why a human intervened. A pending
+  or processing row cannot be replayed; it already belongs to the worker.
+- **Retention** (`npm run retention`). Deletes processed outbox events and completed idempotency
+  records past their windows, in bounded batches, supported by partial indexes. `consumer_inbox` and
+  `audit_effects` are never swept — the first is the dedup boundary and the second is the audit
+  trail, and both carry the append-only trigger that would reject the delete anyway. See
+  [ADR-006](./adr/006-retention-boundaries-and-operator-replay.md).
+- **Metrics** (`GET /metrics`, admin-guarded). Transfer counters and outbox depth by status in
+  Prometheus exposition format, rendered by a pure function in `infrastructure/http/metrics.ts` that
+  knows nothing about features — the composition root passes it plain numbers. The JSON
+  `/v1/admin/metrics` is unchanged.
+
 ## Testing contract
 
 - Unit tests exercise domain/application behavior through in-memory port implementations.

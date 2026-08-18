@@ -1,5 +1,46 @@
 # Changelog
 
+## v1.2.0 — 2026-08-19
+
+Operational surface: the three things a reviewer asks about after the correctness story — what
+happens to an event that fails for good, what stops the tables growing forever, and how you would
+see any of it from outside the process. Decision record:
+[ADR-006](./docs/adr/006-retention-boundaries-and-operator-replay.md).
+
+### Dead-letter inspection and replay
+
+- `npm run outbox list` / `show <id>` / `replay <id>` / `-- replay --all`. Parked events (attempts
+  exhausted) are now a workflow instead of a `psql` session.
+- Replay resets the attempt budget and makes the row claimable again, but keeps `last_error` — the
+  record of why a human intervened.
+- Only parked events can be replayed; a pending or processing row belongs to the worker, and the CLI
+  distinguishes "no such event" from "not parked" because they need different responses.
+- `OutboxAdminStore` is a separate port from `OutboxStore`, so nothing on the worker's hot path can
+  reach inspection or replay.
+
+### Retention
+
+- `npm run retention` deletes processed outbox events (default >30 d) and completed idempotency
+  records (default >7 d), in bounded batches, with `--dry-run` and tunable windows.
+- `consumer_inbox` and `audit_effects` are **never** swept: the first is the dedup boundary that
+  makes redelivery harmless, the second is the audit trail. Both are append-only in the database, so
+  the decision is enforced, not just documented.
+- Only terminal rows are eligible — an `in_progress` idempotency record may still be reclaimed by a
+  retrying caller, however old it is.
+- Migration `010` adds partial indexes so each sweep is an index scan and the indexes stay small.
+
+### Metrics
+
+- `GET /metrics` (admin-guarded) in Prometheus exposition format 0.0.4: transfer counters plus
+  `pulseledger_outbox_events{status}` gauges. The JSON `/v1/admin/metrics` is unchanged.
+- The renderer is a pure function in shared infrastructure with no feature imports; the composition
+  root passes it plain numbers.
+
+### Fixed
+
+- `timestamptz 'infinity'` arrives from `pg` as the JS number `Infinity`, not a `Date`, so mapping a
+  parked outbox row threw. Latent until now: the worker's claim query never selects those rows.
+
 ## v1.1.0 — 2026-08-16
 
 Customer-facing authentication and account ownership — the one gap that made the ledger's central

@@ -1,6 +1,6 @@
 {
   "name": "pulseledger",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "description": "A correctness-first double-entry payment ledger.",
@@ -17,7 +17,9 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
+    "outbox": "tsx src/modules/outbox/outbox-cli.ts",
     "reconcile": "tsx src/modules/reconciliation/reconcile-cli.ts",
+    "retention": "tsx src/retention-cli.ts",
     "seed": "tsx scripts/seed.ts",
     "start": "node dist/server.js",
     "test": "vitest run",

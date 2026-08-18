@@ -44,6 +44,35 @@ export interface OutboxStore {
 
 export type OutboxHandler = (event: OutboxRecord) => Promise<void>;
 
+/**
+ * Operator-facing view of the outbox, kept separate from `OutboxStore` so the worker's hot path
+ * cannot accidentally reach for inspection or replay, and so a future admin surface can be wired
+ * without widening the interface the worker depends on.
+ */
+export interface OutboxAdminStore {
+  /** Events parked after exhausting their attempts: status 'failed' with no next attempt. */
+  listParked(limit: number): Promise<OutboxRecord[]>;
+  findById(id: string): Promise<OutboxRecord | null>;
+  /** Returns false when the id is unknown or the event is not parked. */
+  replay(id: string): Promise<boolean>;
+  replayAllParked(): Promise<number>;
+  countParked(): Promise<number>;
+  /** Deletes processed events older than the cutoff, in bounded batches. Returns rows removed. */
+  purgeProcessedBefore(cutoff: Date, batchSize: number): Promise<number>;
+}
+
+export interface OutboxAdminApplication {
+  countParked(): Promise<number>;
+  findById(id: string): Promise<OutboxRecord | null>;
+  listParked(limit?: number): Promise<OutboxRecord[]>;
+  purgeProcessedBefore(cutoff: Date, batchSize?: number): Promise<number>;
+  replay(id: string): Promise<boolean>;
+  replayAllParked(): Promise<number>;
+}
+
+export const outboxDefaultListLimit = 20;
+export const outboxDefaultPurgeBatchSize = 1_000;
+
 export interface OutboxWorkerConfig {
   batchSize?: number;
   handler?: OutboxHandler;

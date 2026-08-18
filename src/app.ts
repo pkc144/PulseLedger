@@ -4,6 +4,7 @@ import type { RequestLimitsConfig } from './config.js';
 import { errorHandler } from './errors.js';
 import { requireAdminApiKey } from './infrastructure/http/admin-auth.js';
 import { requireApiKey } from './infrastructure/http/api-key-auth.js';
+import { prometheusContentType, renderPrometheusMetrics } from './infrastructure/http/metrics.js';
 import { withRedaction } from './infrastructure/http/logging.js';
 import { PostgresIdempotencyStore } from './modules/idempotency/idempotency-repository.js';
 import { IdempotencyService } from './modules/idempotency/idempotency-service.js';
@@ -159,6 +160,20 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       { schema: { response: { 200: metricsResponseSchema } } },
       async () => ({ transfers: transferMetrics.snapshot() }),
     );
+
+    // The same counters in Prometheus exposition format, plus outbox depth by status. Behind the
+    // admin guard rather than open at the edge: a scrape config can send a header, and the
+    // backlog of a payment system is not something to publish to anyone who can reach the port.
+    // Counters reset on restart, which is exactly what `rate()` expects of a process counter.
+    adminApp.get('/metrics', async (_request, reply) => {
+      const outbox = outboxStore ? await outboxStore.stats() : undefined;
+      return reply.header('content-type', prometheusContentType).send(
+        renderPrometheusMetrics({
+          transfers: transferMetrics.snapshot(),
+          ...(outbox ? { outbox } : {}),
+        }),
+      );
+    });
   });
 
   await app.ready();

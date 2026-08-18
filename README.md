@@ -31,7 +31,7 @@ Measured on the `v1.1.0` tag, with authentication on the request path
 
 | Evidence                    | Result                                                                                                                     |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Automated tests             | **151 passing** — 54 unit, 2 property, 95 integration against real PostgreSQL (`npm test`)                                 |
+| Automated tests             | **169 passing** — 58 unit, 2 property, 109 integration against real PostgreSQL (`npm test`)                                |
 | Concurrency under real load | 7,369 transfer attempts across 4 k6 scenarios; **zero** overdrafts, lost updates, or unbalanced transactions               |
 | Reconciliation after load   | `{ "accountsChecked": 707, "issues": [], "ok": true }` — every cached balance matched the journal exactly                  |
 | Baseline throughput         | 2,498 requests, 79.4 req/s, p50 49.4 ms, p95 560 ms (20 VUs, 2-vCPU PostgreSQL container)                                  |
@@ -87,7 +87,7 @@ curl -s localhost:3000/health/ready
 Run the whole verification gate the way CI does:
 
 ```bash
-npm run check      # architecture → lint → typecheck → 151 tests → build
+npm run check      # architecture → lint → typecheck → 169 tests → build
 ```
 
 ## Move some money
@@ -191,17 +191,20 @@ Decision records:
 - [ADR-003 — Transactional outbox instead of a dual write](./docs/adr/003-transactional-outbox.md)
 - [ADR-004 — Modular monolith with a database-backed worker](./docs/adr/004-modular-monolith-database-worker.md)
 - [ADR-005 — API-key authentication with database-enforced account ownership](./docs/adr/005-api-key-authentication-account-ownership.md)
+- [ADR-006 — Retention boundaries and operator replay](./docs/adr/006-retention-boundaries-and-operator-replay.md)
 
 ## Commands
 
 ```bash
 npm run dev                # watch mode
 npm run check              # architecture + lint + typecheck + tests + build (the local gate)
-npm test                   # 151 tests (Testcontainers starts PostgreSQL if needed)
-npm run test:unit          # 54 tests, no database
-npm run test:integration   # 95 tests against real PostgreSQL
+npm test                   # 169 tests (Testcontainers starts PostgreSQL if needed)
+npm run test:unit          # 58 tests, no database
+npm run test:integration   # 109 tests against real PostgreSQL
 npm run db:migrate         # apply pending migrations
 npm run reconcile          # recompute balances from the journal; non-zero exit on drift
+npm run outbox list        # parked events waiting on a human; `show <id>` / `replay <id>`
+npm run retention -- --dry-run   # preview what a retention sweep would delete
 npm run seed               # realistic dataset via the real services (SEED_ACCOUNTS / SEED_TRANSFERS)
 ./scripts/demo.sh          # the four-invariant demonstration, ~8 seconds
 npm run build && npm start # production build and run
@@ -231,9 +234,9 @@ Benchmark commands and per-scenario intent: [docs/TESTING.md](./docs/TESTING.md)
 
 ## What this is not
 
-There is one static admin key, API keys have no scopes or expiry, metrics are in-process only, and
-the outbox has no retention policy — this is a correctness demonstrator, not a deployable payments
-platform. The full honest list, with the seams each extension would use, is in
+There is one static admin key, API keys have no scopes or expiry, metrics are per-process with no
+scrape infrastructure shipped, and retention runs only when someone invokes it — this is a
+correctness demonstrator, not a deployable payments platform. The full honest list, with the seams each extension would use, is in
 [docs/TRADEOFFS.md](./docs/TRADEOFFS.md).
 
 ## Repository map

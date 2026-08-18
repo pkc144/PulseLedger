@@ -46,12 +46,15 @@ These are real gaps, listed so nobody has to discover them by surprise.
 
 **Operational**
 
-- `/v1/admin/metrics` counters are **in-process**: they reset on restart and describe one instance
-  only. There is no Prometheus endpoint, no dashboards, and no distributed tracing.
-- No retention or archival for `outbox_events`, `idempotency_records`, `consumer_inbox`, or
-  `audit_effects`. All four grow without bound; a production deployment needs a policy.
-- Events parked as permanently failed (`attempts >= 12`) need manual SQL to inspect or replay. There
-  is no dead-letter UI or CLI.
+- Metrics are **per-process**: `GET /metrics` exposes them in Prometheus format (transfer counters,
+  outbox depth by status), but the counters still reset on restart and describe one instance. No
+  scrape config, dashboards, alerting, or distributed tracing ships with the project.
+- Retention exists for `outbox_events` and `idempotency_records` (`npm run retention`), but it is a
+  CLI nobody schedules — a deployment has to run it. `consumer_inbox` and `audit_effects` grow
+  forever by design ([ADR-006](./adr/006-retention-boundaries-and-operator-replay.md)); at real
+  volume they would need partitioning or archival, which this schema does not have.
+- Dead-letter handling is a CLI (`npm run outbox list|show|replay`), not a UI, and there is no
+  alerting when events park — you find out by looking, or by watching the metric.
 - Outbox ordering is best-effort by `created_at`. Concurrent workers make no global-order guarantee.
 - Reconciliation is read-only by design and scans every account with journal entries — fine at demo
   scale, but it is a full recompute, not an incremental check.
