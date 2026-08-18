@@ -62,7 +62,7 @@ named automated test.
 
 Full mapping, including the concurrency and recovery matrix: [docs/TESTING.md](./docs/TESTING.md).
 
-**Status: `v1.2.0`.** Feature-complete against [PROJECT_PLAN.md](./PROJECT_PLAN.md), plus API-key
+**Status: `v1.2.1`.** Feature-complete against [PROJECT_PLAN.md](./PROJECT_PLAN.md), plus API-key
 authentication with account ownership (`v1.1.0`) and an operational surface — dead-letter replay,
 retention, and metrics (`v1.2.0`).
 
@@ -311,6 +311,6 @@ docs/                      ARCHITECTURE · API · TESTING · TRADEOFFS · DEMO �
 
 - [docs/DEMO.md](./docs/DEMO.md) — the three-minute walkthrough, timed
 - [PROJECT_PLAN.md](./PROJECT_PLAN.md) — the eight-week plan, gates, and progress tracker
-- [docs/release/v1.2.0.md](./docs/release/v1.2.0.md) — current release verification record
-- [docs/release/v1.1.0.md](./docs/release/v1.1.0.md) · [v1.0.0](./docs/release/v1.0.0.md) — the records it builds on
+- [docs/release/v1.2.1.md](./docs/release/v1.2.1.md) — current release verification record
+- [v1.2.0](./docs/release/v1.2.0.md) · [v1.1.0](./docs/release/v1.1.0.md) · [v1.0.0](./docs/release/v1.0.0.md) — the records it builds on
 - [docs/weeks-1-2-study-guide.md](./docs/weeks-1-2-study-guide.md) — background notes

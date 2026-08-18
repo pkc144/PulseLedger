@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.2.1 — 2026-08-19
+
+Documentation and configuration patch. **No application logic changed.** Verification record:
+[docs/release/v1.2.1.md](./docs/release/v1.2.1.md).
+
+- **The quick start now works as written.** The project has no dotenv and no script passed
+  `--env-file`, so `cp .env.example .env` followed by `npm run db:migrate` failed with
+  `DATABASE_URL is required`. Every entrypoint script now uses `--env-file-if-exists=.env`;
+  `engines.node` is raised to `>=22.9.0`, where that flag landed. Real environment variables still
+  take precedence, so Docker and CI are unaffected.
+- Earlier clean-clone checks missed this because their scripts exported the variables themselves —
+  they proved the steps work, not the documented environment handling.
+- README rewritten with a plain-language opening: what a ledger is, the four hard problems this
+  solves and what goes wrong without each, the evidence at a glance, and a copy-paste demo. The
+  engineering material is unchanged, under "For engineers".
+
 ## v1.2.0 — 2026-08-19
 
 Operational surface: the three things a reviewer asks about after the correctness story — what
