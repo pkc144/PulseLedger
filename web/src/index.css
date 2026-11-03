@@ -1,0 +1,109 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Inter, ui-sans-serif, system-ui,
+    sans-serif;
+  --font-display:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Inter, ui-sans-serif,
+    system-ui, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+
+  /* Ink: the landing and auth surfaces. Navy-black, never pure black. */
+  --color-ink-950: #050911;
+  --color-ink-900: #0a111f;
+  --color-ink-850: #0e1628;
+  --color-ink-800: #131d33;
+  --color-ink-700: #1c2842;
+
+  /* One accent family: electric cyan into blue. Used sparingly. */
+  --color-pulse-300: #7ee7fb;
+  --color-pulse-400: #38d5f5;
+  --color-pulse-500: #14b8e6;
+  --color-pulse-600: #0b8fd0;
+
+  --animate-fade-up: fade-up 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  --animate-row-in: row-in 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  --animate-travel: travel 1.4s cubic-bezier(0.65, 0, 0.35, 1) both;
+  --animate-ring: ring 2.4s ease-out infinite;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+    background-color: rgb(56 213 245 / 0.12);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    background-color: transparent;
+  }
+}
+
+/* The payment token moving along the transfer rail in the hero dashboard. */
+@keyframes travel {
+  from {
+    left: 0%;
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  to {
+    left: 100%;
+    opacity: 0;
+  }
+}
+
+@keyframes ring {
+  0% {
+    box-shadow: 0 0 0 0 rgb(52 211 153 / 0.45);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 8px rgb(52 211 153 / 0);
+  }
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* Ruled-ledger texture: faint horizontal lines, like accounting paper, behind the hero. */
+.ledger-rule {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 31px,
+    rgb(148 163 184 / 0.06) 31px,
+    rgb(148 163 184 / 0.06) 32px
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

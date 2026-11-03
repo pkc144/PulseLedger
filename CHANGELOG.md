@@ -8,6 +8,10 @@
   customer guard accepts Firebase ID tokens alongside API keys, verified against Google's public
   keys (no service account). First sign-in provisions a principal via `principal_identities`
   (migration 012; race-safe, immutable). Unverified emails get `403 EMAIL_NOT_VERIFIED`.
+- **Browser UI in [`web/`](./web/README.md)** — a landing page, separate user and admin login
+  pages, a customer dashboard (accounts, send money with a per-intent idempotency key, paginated
+  ledger history), and an admin console (onboard customers, fund, reconcile, metrics, revoke keys).
+  Its own package; the backend build and image are unchanged.
 
 ### Fixes
 

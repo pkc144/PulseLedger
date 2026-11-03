@@ -6,7 +6,15 @@ export default tseslint.config(
   {
     // benchmarks/k6/** runs in k6's own JS runtime (k6 globals like __ENV/__VU, a virtual `k6`
     // module resolved by the k6 binary) -- it is not part of this Node/TypeScript project.
-    ignores: ['dist/**', 'coverage/**', 'node_modules/**', 'eslint.config.js', 'benchmarks/**'],
+    // web/** is the browser UI: its own package, tsconfig (DOM + JSX), and build.
+    ignores: [
+      'dist/**',
+      'coverage/**',
+      'node_modules/**',
+      'eslint.config.js',
+      'benchmarks/**',
+      'web/**',
+    ],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
