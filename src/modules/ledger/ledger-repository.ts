@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import type { Database } from '../../ports/database.js';
+import type { Database, TransactionalDatabase } from '../../ports/database.js';
+import { IdempotencyError } from '../idempotency/idempotency-domain.js';
+import { outboxCurrentEventVersion, type OutboxStore } from '../outbox/outbox-domain.js';
 import {
   encodeJournalEntryCursor,
   type JournalEntry,
@@ -9,6 +11,7 @@ import {
   type ListJournalEntriesResult,
   type PostedTransaction,
   type PostingInput,
+  type PostOptions,
 } from './ledger-domain.js';
 
 interface AccountRow extends Record<string, unknown> {
@@ -65,7 +68,10 @@ function toJournalEntry(row: JournalEntryRow): JournalEntry {
 }
 
 export class PostgresLedgerStore implements LedgerStore {
-  public constructor(private readonly database: Database) {}
+  public constructor(
+    private readonly database: TransactionalDatabase,
+    private readonly outboxStore?: OutboxStore,
+  ) {}
 
   public async findAccount(id: string): Promise<LedgerAccount | null> {
     const result = await this.database.query<AccountRow>(
@@ -94,9 +100,13 @@ export class PostgresLedgerStore implements LedgerStore {
   ): Promise<ListJournalEntriesResult> {
     // Fetch one extra row to detect whether a next page exists without a separate COUNT query.
     const fetchLimit = input.limit + 1;
+    // `to_char` on a timestamptz renders it in the *session* time zone, so the literal "Z" is only
+    // true when that zone happens to be UTC. Converting explicitly keeps the cursor correct on a
+    // server configured for any other zone (otherwise page two starts hours away from page one).
     const selectColumns = `id, transaction_id, account_id, currency, direction,
            amount_minor::text AS amount_minor, created_at,
-           to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_at_cursor`;
+           to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+             AS created_at_cursor`;
     const result = input.cursor
       ? await this.database.query<JournalEntryRow>(
           `SELECT ${selectColumns}
@@ -126,27 +136,95 @@ export class PostgresLedgerStore implements LedgerStore {
     return { entries: page.map(toJournalEntry), nextCursor };
   }
 
-  public async post(input: PostingInput): Promise<PostedTransaction> {
-    const result = await this.database.query<TransactionRow>(
-      `SELECT id, type, reference, currency, created_at
-       FROM post_ledger_transaction($1, $2, $3, $4, $5, $6, $7)`,
-      [
-        input.id,
-        input.type,
-        input.reference,
-        input.entries.map(() => randomUUID()),
-        input.entries.map(({ accountId }) => accountId),
-        input.entries.map(({ direction }) => direction),
-        input.entries.map(({ amount }) => amount.toString()),
-      ],
-    );
-    const row = result.rows[0]!;
-    return {
-      createdAt: row.created_at.toISOString(),
-      currency: row.currency,
-      id: row.id,
-      reference: row.reference,
-      type: row.type,
-    };
+  public async post(input: PostingInput, options: PostOptions = {}): Promise<PostedTransaction> {
+    const idempotency = options.idempotency;
+    // A bare posting is one statement and therefore already atomic. Anything written alongside
+    // it -- the outbox event, the idempotency completion -- must commit in the same transaction,
+    // or a crash between the two could move money without its event or its stored response.
+    if (!this.outboxStore && !idempotency) return await postWith(this.database, input);
+
+    const connection = await this.database.connect();
+    try {
+      await connection.query('BEGIN');
+      const posted = await postWith(connection, input);
+
+      if (this.outboxStore) {
+        await this.outboxStore.insert(connection, {
+          aggregateId: posted.id,
+          aggregateType: input.type,
+          eventType: `${input.type}.created`,
+          eventVersion: outboxCurrentEventVersion,
+          payload: {
+            ...posted,
+            entries: input.entries.map((entry) => ({
+              accountId: entry.accountId,
+              amountMinor: entry.amount.toString(),
+              direction: entry.direction,
+            })),
+          },
+        });
+      }
+
+      if (idempotency) {
+        const completed = await connection.query(
+          `UPDATE idempotency_records
+           SET status = 'completed',
+               response_status_code = $1,
+               response_body = $2,
+               completed_at = now()
+           WHERE key = $3 AND operation = $4 AND principal_id = $5 AND status = 'in_progress'`,
+          [
+            idempotency.responseStatus,
+            idempotency.responseBody(posted),
+            idempotency.key,
+            idempotency.operation,
+            idempotency.principalId,
+          ],
+        );
+        // Same backstop as transfers: only the request that completes the claim may post.
+        if (completed.rowCount !== 1) {
+          throw new IdempotencyError(
+            'IDEMPOTENCY_IN_PROGRESS',
+            'A request with this idempotency key is already in progress',
+          );
+        }
+      }
+
+      await connection.query('COMMIT');
+      return posted;
+    } catch (error) {
+      try {
+        await connection.query('ROLLBACK');
+      } catch {
+        // Preserve the original failure.
+      }
+      throw error;
+    } finally {
+      connection.release();
+    }
   }
+}
+
+async function postWith(database: Database, input: PostingInput): Promise<PostedTransaction> {
+  const result = await database.query<TransactionRow>(
+    `SELECT id, type, reference, currency, created_at
+     FROM post_ledger_transaction($1, $2, $3, $4, $5, $6, $7)`,
+    [
+      input.id,
+      input.type,
+      input.reference,
+      input.entries.map(() => randomUUID()),
+      input.entries.map(({ accountId }) => accountId),
+      input.entries.map(({ direction }) => direction),
+      input.entries.map(({ amount }) => amount.toString()),
+    ],
+  );
+  const row = result.rows[0]!;
+  return {
+    createdAt: row.created_at.toISOString(),
+    currency: row.currency,
+    id: row.id,
+    reference: row.reference,
+    type: row.type,
+  };
 }

@@ -172,8 +172,11 @@ An idempotent transfer request extends the transaction boundary to claim or repl
 2. On first use: the key is claimed (INSERT as `in_progress`) before entering the transfer service.
 3. On replay: a completed record returns the stored status code and response body immediately.
 4. On conflict: the same key with a different payload body returns `IDEMPOTENCY_CONFLICT`.
-5. On stale detection: an `in_progress` record older than 30 seconds is atomically reclaimed.
-6. The transfer repository updates the idempotency record to `completed` inside the same `SERIALIZABLE` transaction that posts the transfer. A rollback leaves the record `in_progress` for eventual reclamation.
+5. On stale detection: an `in_progress` record older than 30 seconds is reclaimed by a conditional `UPDATE ... RETURNING`; only the caller whose `UPDATE` moved the row proceeds, and concurrent losers get `IDEMPOTENCY_IN_PROGRESS` (or the winner's replay, if it already finished).
+6. The transfer repository updates the idempotency record to `completed` inside the same `SERIALIZABLE` transaction that posts the transfer, and **requires that update to affect exactly one row**: a transaction that does not hold the claim rolls back instead of posting, so one key can never produce two transfers whatever happens at the claim step.
+7. On failure: the route settles the claim after the rollback. A deterministic `4xx` rejection (e.g. `INSUFFICIENT_FUNDS`) is stored as the key's result and replayed; anything else (`503`, `500`) releases the claim so a retry runs immediately. A request that crashes before settling leaves the record `in_progress` for stale reclamation.
+
+Admin funding (`POST /v1/admin/fund`) follows the same protocol under the fixed, disabled `system-administrator` principal (migration 011), since the admin key is not itself a principal; its posting, `funding.created` outbox event, and idempotency completion commit in one transaction.
 
 No route may split monetary steps across independent transactions. The application use case owns the transaction lifecycle through an injected store; persistence executes SQL using one transaction-scoped database connection.
 

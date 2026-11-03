@@ -16,7 +16,7 @@ Base URL in all examples: `http://localhost:3000`. Set up a server first with th
 | IDs           | UUID v4.                                                                                                |
 | Timestamps    | RFC 3339 / ISO 8601 UTC.                                                                                |
 | Request ID    | Send `x-request-id` to correlate logs; otherwise the server generates one. It is echoed in every error. |
-| Idempotency   | `Idempotency-Key` header on `POST /v1/transfers`. Optional but strongly recommended.                    |
+| Idempotency   | `Idempotency-Key` header (1–256 chars) on `POST /v1/transfers` and `POST /v1/admin/fund`. Recommended.  |
 | Customer auth | `Authorization: Bearer pl_live_...` on every `/v1/accounts` and `/v1/transfers` route.                  |
 | Admin auth    | `x-admin-api-key` header on `/v1/admin/*`. Compared in constant time.                                   |
 | Ownership     | A principal sees and spends only its own accounts. Anything else answers `404`, never `403`.            |
@@ -340,6 +340,12 @@ Without a valid key:
 Both are `401`. The treasury's balance goes negative by design — the demo system conserves total
 value while funding zero-balance customers.
 
+Funding accepts an `Idempotency-Key` with the same replay, conflict, and in-flight semantics as
+transfers below, so a retried funding call never credits the account twice. Funding keys belong to
+one shared administrator namespace (every holder of the admin key), separate from every
+customer's keys. Each funding also commits a `funding.created` outbox event in the same
+transaction as the money, so the audit consumer sees fundings as well as transfers.
+
 ## `POST /v1/transfers`
 
 ```bash
@@ -406,14 +412,26 @@ HTTP/1.1 409 Conflict
 
 A concurrent duplicate that arrives while the first request is still committing gets `409
 IDEMPOTENCY_IN_PROGRESS` immediately rather than blocking. Retry it and you will get the replayed
-`201`. A claim stuck `in_progress` for more than 30 seconds (a crashed request) is reclaimed by the
-next retry.
+`201`. A claim stuck `in_progress` for more than 30 seconds (a crashed request) is reclaimed by
+exactly one retry; concurrent retries that lose the reclaim get `IDEMPOTENCY_IN_PROGRESS`.
+
+### Failure: the key remembers the answer
+
+A rejection that is a property of the request itself — any `4xx` below, such as
+`INSUFFICIENT_FUNDS` — becomes the key's stored result, exactly like a success. Retrying the same
+key replays that same error (same body, original `requestId`) and posts nothing, even if the cause
+has since been fixed: the key names one decision, and that decision was made. Send a new key to
+try again.
+
+A failure that says nothing about the request — `503 TRANSFER_RETRY_EXHAUSTED`, or an unexpected
+`500` — releases the key instead, so a retry with the same key is a fresh attempt immediately.
 
 ### Failure responses
 
 | Status | Code                       | Cause                                                   |
 | -----: | -------------------------- | ------------------------------------------------------- |
 |  `400` | `VALIDATION_ERROR`         | Schema violation — e.g. `"amountMinor":"10.50"`         |
+|  `400` | `VALIDATION_ERROR`         | `Idempotency-Key` longer than 256 characters            |
 |  `400` | `SELF_TRANSFER`            | Source and destination are the same account             |
 |  `400` | `CURRENCY_MISMATCH`        | Accounts hold different currencies                      |
 |  `400` | `INVALID_AMOUNT`           | Amount outside `1 … 9223372036854775807`                |
@@ -435,8 +453,8 @@ next retry.
 }
 ```
 
-`503 TRANSFER_RETRY_EXHAUSTED` is a **safe** failure: the transaction rolled back, so it is always
-correct to retry it (with the same `Idempotency-Key`).
+`503 TRANSFER_RETRY_EXHAUSTED` is a **safe** failure: the transaction rolled back and the key was
+released, so it is always correct to retry it at once with the same `Idempotency-Key`.
 
 ## `GET /v1/transfers/:id`
 

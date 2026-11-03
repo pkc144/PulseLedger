@@ -110,7 +110,7 @@ curl -s localhost:3000/v1/admin/metrics -H "x-admin-api-key: $ADMIN_API_KEY"
 > "Fifty concurrent requests, same key, same body. Every caller gets a `201` with the _same_
 > transfer ID — or a `409 IDEMPOTENCY_IN_PROGRESS` if it arrived while the original was still
 > committing. The completed-transfer counter moved by exactly one. The database, not the
-> application, guarantees that: a unique constraint on `(key, operation)`."
+> application, guarantees that: a unique constraint on `(principal, key, operation)`."
 
 Point at: `transfers.completed` incremented by 1.
 

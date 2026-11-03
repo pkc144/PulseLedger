@@ -1,6 +1,12 @@
 export const principalStatuses = ['active', 'disabled'] as const;
 export type PrincipalStatus = (typeof principalStatuses)[number];
 
+/**
+ * The fixed, permanently disabled principal that administrative requests act as when they need
+ * an owner -- today only for idempotency keys. Seeded by migration 011; never authenticates.
+ */
+export const administratorPrincipalId = '00000000-0000-4000-8000-0000000000ad';
+
 export type AuthErrorCode = 'API_KEY_NOT_FOUND' | 'PRINCIPAL_NOT_FOUND' | 'UNAUTHORIZED';
 
 export class AuthError extends Error {

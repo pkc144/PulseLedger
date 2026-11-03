@@ -77,17 +77,41 @@ export interface PostedTransaction {
   type: PostingInput['type'];
 }
 
+/**
+ * Completes an idempotency claim in the same transaction as the posting, so the stored response
+ * and the money commit together or not at all.
+ */
+export interface PostingIdempotency {
+  key: string;
+  operation: string;
+  principalId: string;
+  /** The response stored for replay, built from the committed posting. */
+  responseBody(posted: PostedTransaction): unknown;
+  responseStatus: number;
+}
+
+export interface PostOptions {
+  idempotency?: PostingIdempotency | undefined;
+}
+
 export interface LedgerStore {
   findAccount(id: string): Promise<LedgerAccount | null>;
   findTreasury(currency: string): Promise<LedgerAccount | null>;
   listJournalEntries(input: ListJournalEntriesInput): Promise<ListJournalEntriesResult>;
-  post(input: PostingInput): Promise<PostedTransaction>;
+  post(input: PostingInput, options?: PostOptions): Promise<PostedTransaction>;
 }
 
 export interface FundAccountInput {
   accountId: string;
   amountMinor: string;
 }
+
+export interface FundAccountOptions {
+  /** Present when the request carried an Idempotency-Key that has already been claimed. */
+  idempotency?: { key: string; principalId: string } | undefined;
+}
+
+export const fundingIdempotencyOperation = 'funding';
 
 export interface FundingResult extends PostedTransaction {
   amountMinor: string;
@@ -154,7 +178,7 @@ export interface ListJournalEntriesOptions {
 }
 
 export interface LedgerApplication {
-  fundAccount(input: FundAccountInput): Promise<FundingResult>;
+  fundAccount(input: FundAccountInput, options?: FundAccountOptions): Promise<FundingResult>;
   /**
    * Journal entries are readable only by the principal that owns the account. `fundAccount` takes
    * no principal because it is an administrative operation, guarded by the admin API key.

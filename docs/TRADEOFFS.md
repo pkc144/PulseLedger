@@ -16,7 +16,7 @@ this page is the summary and the list of things those ADRs consciously left on t
 | Integer minor units, exposed as decimal strings             | No float rounding, no `Number.MAX_SAFE_INTEGER` truncation                           | Every boundary needs explicit `bigint` ↔ string conversion; clients must not `JSON.parse` amounts into numbers |
 | Append-only ledger; corrections are reversing entries       | A complete audit trail; history cannot be quietly rewritten                          | No `UPDATE` escape hatch — fixing a mistake requires posting a new transaction                                 |
 | Transactional outbox instead of publishing from the handler | Transfer and event commit atomically; no dual write                                  | Delivery is at-least-once, so every consumer must be idempotent; the outbox table grows                        |
-| Idempotency claim is a separate statement from the transfer | A concurrent duplicate is rejected instantly (409) instead of blocking on a lock     | A crashed request leaves an `in_progress` row for up to 30 s before it can be reclaimed                        |
+| Idempotency claim is a separate statement from the transfer | A concurrent duplicate is rejected instantly (409) instead of blocking on a lock     | A crashed request leaves an `in_progress` row for up to 30 s before it can be reclaimed (failures release it)  |
 | Worker in the same process as the API                       | One deployable, one dependency, trivially reproducible locally and in CI             | API and worker scale together; a process crash pauses both                                                     |
 | Postgres polling instead of a broker                        | No new infrastructure; durability, ordering and safe claiming come from the database | Poll latency (default 1 s) and no fan-out to other systems                                                     |
 | Invariants enforced in SQL, not only in TypeScript          | A defect or a raw `psql` session still cannot commit invalid financial state         | Some rules are asserted twice, and constraint errors are less expressive than domain errors                    |
@@ -69,7 +69,10 @@ These are real gaps, listed so nobody has to discover them by surprise.
 - No account lifecycle API: `frozen` and `closed` are enforced everywhere but nothing sets them.
 - The `transfers` projection only ever holds `status: "completed"`. There is no pending/settling
   state machine, because a transfer either commits atomically or does not exist.
-- Idempotency records never expire, and the 30-second stale-claim window is a fixed default.
+- Idempotency records expire only when an operator runs the retention sweep (`npm run retention`,
+  7 days by default), and the 30-second stale-claim window is a fixed default.
+- A stored business rejection is final for its key: a client that fixes the cause (e.g. funds the
+  account) must send a new key, not retry the old one.
 
 **Evidence**
 

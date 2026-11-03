@@ -184,18 +184,20 @@ Amounts are **integer minor units as strings** (`"75000"` = ₹750.00). No float
 
 Every endpoint, every error code, and real captured responses: [docs/API.md](./docs/API.md).
 
-| Method | Path                       | Auth  | Purpose                                    |
-| ------ | -------------------------- | ----- | ------------------------------------------ |
-| `POST` | `/v1/accounts`             | —     | Create a zero-balance customer account     |
-| `GET`  | `/v1/accounts/:id`         | —     | Read an account and its cached balance     |
-| `GET`  | `/v1/accounts/:id/entries` | —     | Cursor-paginated journal entries           |
-| `POST` | `/v1/transfers`            | —     | Transfer money (accepts `Idempotency-Key`) |
-| `GET`  | `/v1/transfers/:id`        | —     | Read a stable transfer result              |
-| `POST` | `/v1/admin/fund`           | Admin | Fund a demo account from its treasury      |
-| `POST` | `/v1/admin/reconcile`      | Admin | Recompute balances from the journal        |
-| `GET`  | `/v1/admin/metrics`        | Admin | In-process transfer counters               |
-| `GET`  | `/health/live`             | —     | Liveness, never touches PostgreSQL         |
-| `GET`  | `/health/ready`            | —     | Readiness plus outbox backlog              |
+| Method | Path                       | Auth     | Purpose                                                   |
+| ------ | -------------------------- | -------- | --------------------------------------------------------- |
+| `POST` | `/v1/accounts`             | Customer | Create a zero-balance customer account                    |
+| `GET`  | `/v1/accounts/:id`         | Customer | Read an account and its cached balance                    |
+| `GET`  | `/v1/accounts/:id/entries` | Customer | Cursor-paginated journal entries                          |
+| `POST` | `/v1/transfers`            | Customer | Transfer money (accepts `Idempotency-Key`)                |
+| `GET`  | `/v1/transfers/:id`        | Customer | Read a stable transfer result                             |
+| `POST` | `/v1/admin/fund`           | Admin    | Fund a demo account from its treasury (`Idempotency-Key`) |
+| `POST` | `/v1/admin/reconcile`      | Admin    | Recompute balances from the journal                       |
+| `GET`  | `/v1/admin/metrics`        | Admin    | In-process transfer counters                              |
+| `GET`  | `/health/live`             | —        | Liveness, never touches PostgreSQL                        |
+| `GET`  | `/health/ready`            | —        | Readiness plus outbox backlog                             |
+
+Customer routes need `Authorization: Bearer <customer key>`; admin routes need `x-admin-api-key`.
 
 ## How it works
 

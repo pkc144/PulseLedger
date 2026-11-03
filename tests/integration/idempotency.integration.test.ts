@@ -5,6 +5,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../../src/app.js';
 import { createPool } from '../../src/infrastructure/database/pool.js';
 import { runMigrations } from '../../src/infrastructure/database/migrate.js';
+import { PostgresIdempotencyStore } from '../../src/modules/idempotency/idempotency-repository.js';
+import {
+  computeCanonicalFingerprint,
+  IdempotencyService,
+} from '../../src/modules/idempotency/idempotency-service.js';
+import { PostgresTransferStore } from '../../src/modules/transfers/transfer-repository.js';
+import { TransferService } from '../../src/modules/transfers/transfer-service.js';
 import { createTestPrincipal, type TestPrincipal } from '../helpers/auth.js';
 
 const testAdminApiKey = 'test-admin-api-key-0123456789';
@@ -224,5 +231,240 @@ describe('request idempotency with PostgreSQL', () => {
     expect(second.json<{ id: string }>().id).not.toBe(response.json<{ id: string }>().id);
 
     expect(await countTransfers()).toBe(2);
+  });
+});
+
+/** Plants an `in_progress` claim that is already past the stale window, as a crash would leave. */
+async function plantStaleClaim(key: string, body: unknown, owner = principal.principalId) {
+  await pool.query(
+    `INSERT INTO idempotency_records
+       (principal_id, key, operation, request_fingerprint, status, created_at)
+     VALUES ($1, $2, 'transfer', $3, 'in_progress', now() - interval '1 hour')`,
+    [owner, key, computeCanonicalFingerprint(body)],
+  );
+}
+
+describe('stale-claim reclaim', () => {
+  it('hands a stale claim to exactly one of many concurrent reclaimers', async () => {
+    const store = new PostgresIdempotencyStore(pool);
+    const body = { amountMinor: '10', destinationAccountId: 'd', sourceAccountId: 's' };
+    const key = `stale-${randomUUID()}`;
+    await plantStaleClaim(key, body);
+
+    const outcomes = await Promise.allSettled(
+      Array.from({ length: 10 }, async () =>
+        store.claim({
+          fingerprint: computeCanonicalFingerprint(body),
+          key,
+          operation: 'transfer',
+          principalId: principal.principalId,
+          staleTimeoutMs: 30_000,
+        }),
+      ),
+    );
+
+    const proceeded = outcomes.filter(
+      (outcome) => outcome.status === 'fulfilled' && outcome.value.action === 'proceed',
+    );
+    expect(proceeded).toHaveLength(1);
+    for (const outcome of outcomes) {
+      if (outcome.status === 'rejected') {
+        expect(outcome.reason).toMatchObject({ code: 'IDEMPOTENCY_IN_PROGRESS' });
+      }
+    }
+  });
+
+  it('posts exactly one transfer when concurrent retries race to reclaim a stale key', async () => {
+    const sourceId = await createAccount();
+    const destinationId = await createAccount();
+    await fund(sourceId, '1000');
+    const key = `stale-race-${randomUUID()}`;
+    await plantStaleClaim(key, {
+      amountMinor: '10',
+      destinationAccountId: destinationId,
+      sourceAccountId: sourceId,
+    });
+
+    const responses = await Promise.all(
+      Array.from({ length: 20 }, async () => await transfer(sourceId, destinationId, '10', key)),
+    );
+
+    expect(await countTransfers()).toBe(1);
+    const ids = responses
+      .filter(({ statusCode }) => statusCode === 201)
+      .map((response) => response.json<{ id: string }>().id);
+    expect(new Set(ids).size).toBe(1);
+    expect(responses.every(({ statusCode }) => statusCode === 201 || statusCode === 409)).toBe(
+      true,
+    );
+  });
+
+  it('refuses to post a transfer whose claim it does not hold, and rolls the money back', async () => {
+    const sourceId = await createAccount();
+    const destinationId = await createAccount();
+    await fund(sourceId, '100');
+    const key = `already-completed-${randomUUID()}`;
+    // The key was completed by some other request; this transfer never claimed it.
+    await pool.query(
+      `INSERT INTO idempotency_records
+         (principal_id, key, operation, request_fingerprint, status, response_status_code,
+          response_body, completed_at)
+       VALUES ($1, $2, 'transfer', 'x', 'completed', 201, '{}', now())`,
+      [principal.principalId, key],
+    );
+
+    const service = new TransferService(new PostgresTransferStore(pool));
+    await expect(
+      service.create(
+        { amountMinor: '10', destinationAccountId: destinationId, sourceAccountId: sourceId },
+        principal.principalId,
+        { idempotencyKey: key },
+      ),
+    ).rejects.toMatchObject({ code: 'IDEMPOTENCY_IN_PROGRESS' });
+
+    expect(await countTransfers()).toBe(0);
+    const balance = await pool.query<{ balance_minor: string }>(
+      'SELECT balance_minor::text FROM accounts WHERE id = $1',
+      [sourceId],
+    );
+    expect(balance.rows[0]!.balance_minor).toBe('100');
+  });
+});
+
+describe('failed requests under an idempotency key', () => {
+  it('stores a business rejection and replays it, even after the cause is fixed', async () => {
+    const sourceId = await createAccount();
+    const destinationId = await createAccount();
+    await fund(sourceId, '10');
+    const key = `rejected-${randomUUID()}`;
+
+    const first = await transfer(sourceId, destinationId, '50', key);
+    expect(first.statusCode).toBe(409);
+    expect(first.json()).toMatchObject({ error: { code: 'INSUFFICIENT_FUNDS' } });
+
+    // Before: the claim stayed `in_progress`, so this retry got IDEMPOTENCY_IN_PROGRESS for 30 s
+    // and then silently re-executed. Now the key's answer is the original rejection.
+    await fund(sourceId, '100');
+    const retry = await transfer(sourceId, destinationId, '50', key);
+    expect(retry.statusCode).toBe(409);
+    expect(retry.json()).toEqual(first.json());
+    expect(await countTransfers()).toBe(0);
+
+    const record = await pool.query<{ response_status_code: number; status: string }>(
+      'SELECT status, response_status_code FROM idempotency_records WHERE key = $1',
+      [key],
+    );
+    expect(record.rows[0]).toEqual({ status: 'completed', response_status_code: 409 });
+  });
+
+  it('releases an unfinished claim so the key can be retried at once', async () => {
+    const store = new PostgresIdempotencyStore(pool);
+    const service = new IdempotencyService(store);
+    const body = { amountMinor: '10' };
+    const key = `released-${randomUUID()}`;
+
+    expect(await service.claimOrReplay(key, 'transfer', principal.principalId, body)).toBeNull();
+    await service.settleFailure(key, 'transfer', principal.principalId, null);
+    // Without the release this would be IDEMPOTENCY_IN_PROGRESS for the next 30 seconds.
+    expect(await service.claimOrReplay(key, 'transfer', principal.principalId, body)).toBeNull();
+  });
+
+  it('never releases a completed record', async () => {
+    const sourceId = await createAccount();
+    const destinationId = await createAccount();
+    await fund(sourceId, '100');
+    const key = `kept-${randomUUID()}`;
+    const first = await transfer(sourceId, destinationId, '10', key);
+    expect(first.statusCode).toBe(201);
+
+    await new PostgresIdempotencyStore(pool).release({
+      key,
+      operation: 'transfer',
+      principalId: principal.principalId,
+    });
+
+    const replay = await transfer(sourceId, destinationId, '10', key);
+    expect(replay.json()).toEqual(first.json());
+    expect(await countTransfers()).toBe(1);
+  });
+
+  it('rejects an over-long key as a client error instead of a 500', async () => {
+    const sourceId = await createAccount();
+    const destinationId = await createAccount();
+    await fund(sourceId, '100');
+
+    const response = await transfer(sourceId, destinationId, '10', 'k'.repeat(257));
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
+    expect(await countTransfers()).toBe(0);
+  });
+});
+
+describe('idempotent admin funding', () => {
+  async function fundWithKey(accountId: string, amountMinor: string, key: string) {
+    return await app.inject({
+      method: 'POST',
+      url: '/v1/admin/fund',
+      headers: { 'x-admin-api-key': testAdminApiKey, 'idempotency-key': key },
+      payload: { accountId, amountMinor },
+    });
+  }
+
+  async function balanceOf(accountId: string): Promise<string> {
+    const result = await pool.query<{ balance_minor: string }>(
+      'SELECT balance_minor::text FROM accounts WHERE id = $1',
+      [accountId],
+    );
+    return result.rows[0]!.balance_minor;
+  }
+
+  it('replays a retried funding instead of crediting the account twice', async () => {
+    const accountId = await createAccount();
+    const key = `fund-${randomUUID()}`;
+
+    const first = await fundWithKey(accountId, '500', key);
+    expect(first.statusCode).toBe(201);
+    const second = await fundWithKey(accountId, '500', key);
+    expect(second.statusCode).toBe(201);
+    expect(second.json()).toEqual(first.json());
+
+    expect(await balanceOf(accountId)).toBe('500');
+  });
+
+  it('credits exactly once under 20 concurrent identical fundings', async () => {
+    const accountId = await createAccount();
+    const key = `fund-concurrent-${randomUUID()}`;
+
+    const responses = await Promise.all(
+      Array.from({ length: 20 }, async () => await fundWithKey(accountId, '700', key)),
+    );
+
+    expect(await balanceOf(accountId)).toBe('700');
+    const ids = responses
+      .filter(({ statusCode }) => statusCode === 201)
+      .map((response) => response.json<{ id: string }>().id);
+    expect(new Set(ids).size).toBe(1);
+  });
+
+  it('conflicts when a funding key is reused with a different amount', async () => {
+    const accountId = await createAccount();
+    const key = `fund-conflict-${randomUUID()}`;
+
+    expect((await fundWithKey(accountId, '100', key)).statusCode).toBe(201);
+    const conflict = await fundWithKey(accountId, '200', key);
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json()).toMatchObject({ error: { code: 'IDEMPOTENCY_CONFLICT' } });
+    expect(await balanceOf(accountId)).toBe('100');
+  });
+
+  it('keeps funding keys apart from a customer using the same string for a transfer', async () => {
+    const sourceId = await createAccount();
+    const destinationId = await createAccount();
+    const key = `shared-${randomUUID()}`;
+
+    expect((await fundWithKey(sourceId, '100', key)).statusCode).toBe(201);
+    const customerTransfer = await transfer(sourceId, destinationId, '40', key);
+    expect(customerTransfer.statusCode).toBe(201);
+    expect(await balanceOf(sourceId)).toBe('60');
   });
 });

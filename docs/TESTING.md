@@ -151,14 +151,20 @@ test you can run by name.
 
 ### Invariant 3 — one idempotency key, one result
 
-| Evidence                                           | Test                                                                                                                           |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Same key + body replays the original               | `tests/integration/idempotency.integration.test.ts` → _replays a completed response for the same key and body_                 |
-| Same key + different body conflicts                | `tests/integration/idempotency.integration.test.ts` → _returns conflict for same key with different request body_              |
-| **50 concurrent duplicates post once**             | `tests/integration/idempotency.integration.test.ts` → _handles 50 concurrent identical requests creating exactly one transfer_ |
-| Lost-response retry is safe                        | `tests/integration/idempotency.integration.test.ts` → _simulates lost-response retry safely_                                   |
-| Record completes inside the transfer's transaction | `tests/integration/idempotency.integration.test.ts` → _stores the idempotency record atomically with the transfer_             |
-| Stale in-progress claim is reclaimed               | `tests/unit/idempotency.test.ts` → _reclaims a stale in_progress record_                                                       |
+| Evidence                                           | Test                                                                                                                                      |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Same key + body replays the original               | `tests/integration/idempotency.integration.test.ts` → _replays a completed response for the same key and body_                            |
+| Same key + different body conflicts                | `tests/integration/idempotency.integration.test.ts` → _returns conflict for same key with different request body_                         |
+| **50 concurrent duplicates post once**             | `tests/integration/idempotency.integration.test.ts` → _handles 50 concurrent identical requests creating exactly one transfer_            |
+| Lost-response retry is safe                        | `tests/integration/idempotency.integration.test.ts` → _simulates lost-response retry safely_                                              |
+| Record completes inside the transfer's transaction | `tests/integration/idempotency.integration.test.ts` → _stores the idempotency record atomically with the transfer_                        |
+| Stale in-progress claim is reclaimed               | `tests/unit/idempotency.test.ts` → _reclaims a stale in_progress record_                                                                  |
+| **A stale claim goes to exactly one reclaimer**    | `tests/integration/idempotency.integration.test.ts` → _hands a stale claim to exactly one of many concurrent reclaimers_                  |
+| **Racing reclaims still post once**                | `tests/integration/idempotency.integration.test.ts` → _posts exactly one transfer when concurrent retries race to reclaim a stale key_    |
+| A transfer without the claim cannot post           | `tests/integration/idempotency.integration.test.ts` → _refuses to post a transfer whose claim it does not hold, and rolls the money back_ |
+| A business rejection is the key's stable result    | `tests/integration/idempotency.integration.test.ts` → _stores a business rejection and replays it, even after the cause is fixed_         |
+| A retryable failure releases the key               | `tests/integration/idempotency.integration.test.ts` → _releases an unfinished claim so the key can be retried at once_                    |
+| **A retried funding credits once**                 | `tests/integration/idempotency.integration.test.ts` → _credits exactly once under 20 concurrent identical fundings_                       |
 
 ### Invariant 4 — one event, at most one effect
 
@@ -166,6 +172,8 @@ test you can run by name.
 | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Event commits with the transfer               | `tests/integration/outbox.integration.test.ts` → _commits an outbox event with every transfer_                                                              |
 | Rolled-back transfer writes no event          | `tests/integration/outbox.integration.test.ts` → _does not create outbox events for insufficient-funds transfers_                                           |
+| Event commits with every funding              | `tests/integration/outbox.integration.test.ts` → _commits an outbox event with every funding_                                                               |
+| Shutdown waits for the in-flight batch        | `tests/integration/outbox.integration.test.ts` → _waits for an in-flight event to finish before stop() resolves_                                            |
 | **Committed event survives a worker restart** | `tests/integration/outbox.integration.test.ts` → _delivers a committed event after a worker restart (stop before processing)_                               |
 | A processed event is not redelivered          | `tests/integration/outbox.integration.test.ts` → _does not redeliver an event after restart once committed processed (stop after commit)_                   |
 | Two workers never double-claim                | `tests/integration/outbox.integration.test.ts` → _never lets two workers double-claim the same event_                                                       |

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Database, DatabaseConnection, TransactionalDatabase } from '../../ports/database.js';
+import { IdempotencyError } from '../idempotency/idempotency-domain.js';
 import { outboxCurrentEventVersion, type OutboxStore } from '../outbox/outbox-domain.js';
 import type {
   LockedTransferAccount,
@@ -127,7 +128,7 @@ class PostgresTransferTransaction implements TransferTransaction {
     }
 
     if (input.idempotency) {
-      await this.database.query(
+      const completed = await this.database.query(
         `UPDATE idempotency_records
          SET status = 'completed',
              response_status_code = $1,
@@ -142,6 +143,15 @@ class PostgresTransferTransaction implements TransferTransaction {
           input.idempotency.principalId,
         ],
       );
+      // The money may only move if this transaction is the one that completes the key's claim.
+      // Zero rows means another request already completed it (or holds it now), so posting here
+      // would be a second transfer under one key. Throwing rolls everything above back.
+      if (completed.rowCount !== 1) {
+        throw new IdempotencyError(
+          'IDEMPOTENCY_IN_PROGRESS',
+          'A request with this idempotency key is already in progress',
+        );
+      }
     }
 
     return transfer;

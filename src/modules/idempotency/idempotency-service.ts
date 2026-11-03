@@ -49,6 +49,25 @@ export class IdempotencyService implements IdempotencyApplication {
 
     return null;
   }
+
+  public async settleFailure(
+    key: string,
+    operation: string,
+    principalId: string,
+    failure: StoredIdempotentResponse | null,
+  ): Promise<void> {
+    if (failure) {
+      await this.store.complete({
+        key,
+        operation,
+        principalId,
+        responseBody: failure.body,
+        responseStatus: failure.status,
+      });
+      return;
+    }
+    await this.store.release({ key, operation, principalId });
+  }
 }
 
 export function computeCanonicalFingerprint(requestBody: unknown): string {

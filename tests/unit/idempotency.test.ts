@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { AppError, replayableFailure } from '../../src/errors.js';
+import { TransferError } from '../../src/modules/transfers/transfer-domain.js';
 import {
   canonicalSerialize,
   IdempotencyError,
@@ -86,6 +88,15 @@ class FakeIdempotencyStore implements IdempotencyStore {
       record.responseStatus = params.responseStatus;
       record.completedAt = new Date().toISOString();
     }
+  }
+
+  public async release(params: {
+    key: string;
+    operation: string;
+    principalId: string;
+  }): Promise<void> {
+    const compoundKey = `${params.principalId}:${params.key}:${params.operation}`;
+    if (this.records.get(compoundKey)?.status === 'in_progress') this.records.delete(compoundKey);
   }
 
   public async purgeCompletedBefore(): Promise<number> {
@@ -231,5 +242,55 @@ describe('idempotency service', () => {
 
     expect(store.getRecord('key-1', 'transfer')?.operation).toBe('transfer');
     expect(store.getRecord('key-1', 'fund')?.operation).toBe('fund');
+  });
+});
+
+describe('settling a failed claim', () => {
+  it('stores a deterministic failure as the key’s replayed answer', async () => {
+    const store = new FakeIdempotencyStore();
+    const service = new IdempotencyService(store);
+    await service.claimOrReplay('key-1', 'transfer', principalId, requestBody);
+
+    const failure = { body: { error: { code: 'INSUFFICIENT_FUNDS' } }, status: 409 };
+    await service.settleFailure('key-1', 'transfer', principalId, failure);
+
+    expect(await service.claimOrReplay('key-1', 'transfer', principalId, requestBody)).toEqual(
+      failure,
+    );
+  });
+
+  it('releases the claim when the failure says nothing about the request', async () => {
+    const store = new FakeIdempotencyStore();
+    const service = new IdempotencyService(store);
+    await service.claimOrReplay('key-1', 'transfer', principalId, requestBody);
+
+    await service.settleFailure('key-1', 'transfer', principalId, null);
+
+    expect(store.getRecord('key-1', 'transfer')).toBeUndefined();
+    expect(await service.claimOrReplay('key-1', 'transfer', principalId, requestBody)).toBeNull();
+  });
+});
+
+describe('replayableFailure', () => {
+  it('captures a known 4xx exactly as the error handler would send it', () => {
+    const error = new TransferError('INSUFFICIENT_FUNDS', 'Source account has insufficient funds');
+    expect(replayableFailure(error, 'req-1')).toEqual({
+      body: {
+        error: {
+          code: 'INSUFFICIENT_FUNDS',
+          message: 'Source account has insufficient funds',
+          requestId: 'req-1',
+        },
+      },
+      status: 409,
+    });
+  });
+
+  it('refuses to store retryable or unexpected failures', () => {
+    expect(
+      replayableFailure(new TransferError('TRANSFER_RETRY_EXHAUSTED', 'exhausted'), 'req-1'),
+    ).toBeNull();
+    expect(replayableFailure(new Error('connection reset'), 'req-1')).toBeNull();
+    expect(replayableFailure(new AppError('INTERNAL', 500, 'boom'), 'req-1')).toBeNull();
   });
 });

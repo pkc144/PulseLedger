@@ -1,6 +1,10 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { AppError } from '../../errors.js';
-import type { IdempotencyApplication } from '../idempotency/idempotency-domain.js';
+import { AppError, replayableFailure } from '../../errors.js';
+import {
+  IdempotencyError,
+  idempotencyKeyFrom,
+  type IdempotencyApplication,
+} from '../idempotency/idempotency-domain.js';
 import type { CreateTransferInput, TransferApplication } from './transfer-domain.js';
 
 interface TransferRouteOptions {
@@ -60,11 +64,10 @@ export const transferRoutes: FastifyPluginAsync<TransferRouteOptions> = async (a
     },
     async (request, reply) => {
       const principalId = principalOf(request);
-      const idempotencyKey = request.headers['idempotency-key'];
-      const key =
-        typeof idempotencyKey === 'string' && idempotencyKey.length > 0
-          ? idempotencyKey
-          : undefined;
+      const key = idempotencyKeyFrom(request.headers['idempotency-key']);
+      if (key === null) {
+        throw new AppError('VALIDATION_ERROR', 400, 'Idempotency-Key must be 1-256 characters');
+      }
 
       if (key) {
         // Keys are namespaced by principal in storage, so two callers may pick the same string
@@ -80,10 +83,26 @@ export const transferRoutes: FastifyPluginAsync<TransferRouteOptions> = async (a
         }
       }
 
-      const transfer = await options.service.create(request.body, principalId, {
-        idempotencyKey: key,
-      });
-      return reply.status(201).send(transfer);
+      try {
+        const transfer = await options.service.create(request.body, principalId, {
+          idempotencyKey: key,
+        });
+        return reply.status(201).send(transfer);
+      } catch (error) {
+        // The transfer rolled back, so its claim must not sit `in_progress` until the stale
+        // window expires: a deterministic rejection becomes the key's stored answer, anything
+        // else releases the key for an immediate retry. An IdempotencyError means the claim is
+        // no longer this request's to settle. Settling failures are logged, never allowed to
+        // replace the error the client is owed.
+        if (key && !(error instanceof IdempotencyError)) {
+          await options.idempotency
+            .settleFailure(key, 'transfer', principalId, replayableFailure(error, request.id))
+            .catch((settleError: unknown) => {
+              request.log.error({ err: settleError }, 'failed to settle idempotency claim');
+            });
+        }
+        throw error;
+      }
     },
   );
 

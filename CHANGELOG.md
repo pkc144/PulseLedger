@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- **One idempotency key could post two transfers.** Reclaiming a stale `in_progress` claim ran an
+  `UPDATE` without checking it matched, then proceeded on a re-read — so every concurrent reclaimer
+  proceeded, and each posted its own transfer. Reclaim is now `UPDATE ... RETURNING` and only the
+  caller that moved the row proceeds. As a backstop, the transfer transaction now requires its
+  idempotency completion to hit exactly one row and rolls back otherwise, so the guarantee no
+  longer depends on the claim step being right.
+- **Failed requests no longer wedge their key.** A rejection such as `INSUFFICIENT_FUNDS` used to
+  leave the claim `in_progress`: retries got `409 IDEMPOTENCY_IN_PROGRESS` for 30 s, then silently
+  re-executed. A deterministic `4xx` is now stored and replayed as the key's result; a `503`/`500`
+  releases the key for an immediate retry.
+- **Admin funding is idempotent and evented.** `POST /v1/admin/fund` accepts `Idempotency-Key`
+  (a retried call used to credit the account twice), scoped to a fixed, disabled
+  `system-administrator` principal (migration `011`). Each funding commits a `funding.created`
+  outbox event in the same transaction as the money.
+- **Journal pagination was wrong on any non-UTC database.** The cursor's timestamp was rendered in
+  the session time zone but labelled `Z`, so page two started hours from page one. CI never saw it
+  because its PostgreSQL runs in UTC; a regression test now forces a non-UTC session.
+- **Graceful shutdown no longer cuts off the outbox worker.** `stop()` resolved immediately even
+  mid-batch, and the pool was closed underneath it, leaving claimed events stuck `processing` for
+  the full 5-minute lease. It now waits for the in-flight poll.
+- An `Idempotency-Key` over 256 characters is a `400 VALIDATION_ERROR` instead of a database
+  `CHECK` violation surfacing as a `500`.
+
 ## v1.2.1 — 2026-08-19
 
 Documentation and configuration patch. **No application logic changed.** Verification record:

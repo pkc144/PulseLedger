@@ -11,6 +11,7 @@ import { IdempotencyService } from './modules/idempotency/idempotency-service.js
 import { PostgresAccountStore } from './modules/accounts/account-repository.js';
 import { accountRoutes } from './modules/accounts/account-routes.js';
 import { AccountService } from './modules/accounts/account-service.js';
+import { administratorPrincipalId } from './modules/auth/auth-domain.js';
 import { PostgresAuthStore } from './modules/auth/auth-repository.js';
 import { authRoutes } from './modules/auth/auth-routes.js';
 import { AuthService } from './modules/auth/auth-service.js';
@@ -102,8 +103,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
 
   const idempotencyStore = new PostgresIdempotencyStore(options.database);
+  const idempotency = new IdempotencyService(idempotencyStore);
   const outboxStore = options.outboxStore;
-  const ledgerService = new LedgerPostingService(new PostgresLedgerStore(options.database));
+  const ledgerService = new LedgerPostingService(
+    new PostgresLedgerStore(options.database, outboxStore),
+  );
   const authService = new AuthService(new PostgresAuthStore(options.database));
 
   // Health is the only unauthenticated surface: a load balancer cannot hold a credential, and
@@ -127,7 +131,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       service: new AccountService(new PostgresAccountStore(options.database)),
     });
     await customerApp.register(transferRoutes, {
-      idempotency: new IdempotencyService(idempotencyStore),
+      idempotency,
       service: new TransferService(new PostgresTransferStore(options.database, outboxStore), {
         metrics: transferMetrics,
         telemetry: {
@@ -144,7 +148,12 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(async (adminApp) => {
     adminApp.addHook('onRequest', requireAdminApiKey(options.adminApiKey));
 
-    await adminApp.register(ledgerRoutes, { service: ledgerService });
+    await adminApp.register(ledgerRoutes, {
+      // The admin key is not a principal, so funding keys are owned by the fixed administrator
+      // principal: one shared namespace for every caller holding the admin key.
+      idempotency: { application: idempotency, principalId: administratorPrincipalId },
+      service: ledgerService,
+    });
     // Customer credentials are minted and revoked only by an administrator: a customer key can
     // never issue another key, for itself or anyone else.
     await adminApp.register(authRoutes, { service: authService });

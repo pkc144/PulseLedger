@@ -132,10 +132,48 @@ describe('outbox integration', () => {
       });
       expect(response.statusCode).toBe(409);
 
+      // The funding above legitimately wrote its own event; the rejected transfer must not.
       const result = await pool.query<{ count: number }>(
-        'SELECT count(*)::int AS count FROM outbox_events',
+        "SELECT count(*)::int AS count FROM outbox_events WHERE aggregate_type = 'transfer'",
       );
       expect(result.rows[0]!.count).toBe(0);
+    });
+  });
+
+  describe('funding outbox event', () => {
+    it('commits an outbox event with every funding', async () => {
+      const accountId = await createAccount('INR');
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/admin/fund',
+        headers: { 'x-admin-api-key': testAdminApiKey },
+        payload: { accountId, amountMinor: '4200' },
+      });
+      expect(response.statusCode).toBe(201);
+      const funding = response.json<{ id: string }>();
+
+      const result = await pool.query<{
+        aggregate_type: string;
+        event_type: string;
+        payload: { entries: { accountId: string; amountMinor: string; direction: string }[] };
+        status: string;
+      }>(
+        `SELECT aggregate_type, event_type, payload, status
+         FROM outbox_events WHERE aggregate_id = $1`,
+        [funding.id],
+      );
+
+      expect(result.rows).toHaveLength(1);
+      const row = result.rows[0]!;
+      expect(row.aggregate_type).toBe('funding');
+      expect(row.event_type).toBe('funding.created');
+      expect(row.status).toBe('pending');
+      expect(row.payload.entries).toContainEqual({
+        accountId,
+        amountMinor: '4200',
+        direction: 'debit',
+      });
     });
   });
 
@@ -408,6 +446,43 @@ describe('outbox integration', () => {
     it('is safe to stop a stopped worker', async () => {
       const worker = new OutboxWorker(outboxStore);
       await worker.stop();
+    });
+
+    it('waits for an in-flight event to finish before stop() resolves', async () => {
+      let handlerStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        handlerStarted = resolve;
+      });
+      let handlerFinished = false;
+      const worker = new OutboxWorker(outboxStore, {
+        batchSize: 1,
+        pollIntervalMs: 10,
+        handler: async () => {
+          handlerStarted();
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          handlerFinished = true;
+        },
+      });
+
+      const eventId = randomUUID();
+      await pool.query(
+        `INSERT INTO outbox_events (id, aggregate_id, aggregate_type, event_type, payload)
+         VALUES ($1, $2, 'transfer', 'transfer.created', '{}')`,
+        [eventId, randomUUID()],
+      );
+
+      worker.start();
+      await started;
+      // The process entrypoint closes the pool right after this resolves. Before the fix it
+      // resolved immediately, leaving the claimed event stuck 'processing' for its whole lease.
+      await worker.stop();
+
+      expect(handlerFinished).toBe(true);
+      const result = await pool.query<{ status: string }>(
+        'SELECT status FROM outbox_events WHERE id = $1',
+        [eventId],
+      );
+      expect(result.rows[0]!.status).toBe('processed');
     });
   });
 

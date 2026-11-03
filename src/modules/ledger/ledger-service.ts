@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import {
   decodeJournalEntryCursor,
+  fundingIdempotencyOperation,
   journalEntriesDefaultLimit,
   journalEntriesMaxLimit,
   LedgerError,
   Money,
   validatePosting,
   type FundAccountInput,
+  type FundAccountOptions,
   type FundingResult,
   type LedgerApplication,
   type LedgerStore,
@@ -14,6 +16,7 @@ import {
   type ListJournalEntriesResult,
   type PostedTransaction,
   type PostingInput,
+  type PostOptions,
 } from './ledger-domain.js';
 
 // The HTTP schema is the primary gate for `limit` (integer, 1..journalEntriesMaxLimit); this is a
@@ -28,12 +31,15 @@ function resolveLimit(requested: number | undefined): number {
 export class LedgerPostingService implements LedgerApplication {
   public constructor(private readonly store: LedgerStore) {}
 
-  public async post(input: PostingInput): Promise<PostedTransaction> {
+  public async post(input: PostingInput, options?: PostOptions): Promise<PostedTransaction> {
     validatePosting(input);
-    return await this.store.post(input);
+    return await this.store.post(input, options);
   }
 
-  public async fundAccount(input: FundAccountInput): Promise<FundingResult> {
+  public async fundAccount(
+    input: FundAccountInput,
+    options: FundAccountOptions = {},
+  ): Promise<FundingResult> {
     const amount = Money.fromMinor(input.amountMinor);
     const account = await this.store.findAccount(input.accountId);
     if (!account || account.isTreasury) {
@@ -49,17 +55,35 @@ export class LedgerPostingService implements LedgerApplication {
     }
 
     const id = randomUUID();
-    const posted = await this.post({
-      id,
-      reference: `funding:${id}`,
-      type: 'funding',
-      entries: [
-        { accountId: account.id, amount, currency: account.currency, direction: 'debit' },
-        { accountId: treasury.id, amount, currency: account.currency, direction: 'credit' },
-      ],
+    const toResult = (posted: PostedTransaction): FundingResult => ({
+      ...posted,
+      amountMinor: amount.toString(),
+      fundedAccountId: account.id,
     });
+    const posted = await this.post(
+      {
+        id,
+        reference: `funding:${id}`,
+        type: 'funding',
+        entries: [
+          { accountId: account.id, amount, currency: account.currency, direction: 'debit' },
+          { accountId: treasury.id, amount, currency: account.currency, direction: 'credit' },
+        ],
+      },
+      {
+        idempotency: options.idempotency
+          ? {
+              key: options.idempotency.key,
+              operation: fundingIdempotencyOperation,
+              principalId: options.idempotency.principalId,
+              responseBody: toResult,
+              responseStatus: 201,
+            }
+          : undefined,
+      },
+    );
 
-    return { ...posted, amountMinor: amount.toString(), fundedAccountId: account.id };
+    return toResult(posted);
   }
 
   public async listJournalEntries(

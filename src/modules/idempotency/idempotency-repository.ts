@@ -30,6 +30,11 @@ function toRecord(row: IdempotencyRow): IdempotencyRecord {
   };
 }
 
+const recordColumns = `key, operation, request_fingerprint, status, response_status_code,
+       response_body, created_at, completed_at`;
+
+const maxClaimAttempts = 3;
+
 function toResponse(record: IdempotencyRecord) {
   return { body: record.responseBody, status: record.responseStatus! };
 }
@@ -44,6 +49,26 @@ export class PostgresIdempotencyStore implements IdempotencyStore {
     principalId: string;
     staleTimeoutMs: number;
   }): Promise<ClaimResult> {
+    // A record can disappear between the conflicting INSERT and the follow-up read (a failed
+    // request releasing its claim, or a retention sweep). That is not an error, just a lost race
+    // for an empty slot, so the claim is simply attempted again. Bounded so it cannot spin.
+    for (let attempt = 1; attempt <= maxClaimAttempts; attempt += 1) {
+      const result = await this.tryClaim(params);
+      if (result) return result;
+    }
+    throw new IdempotencyError(
+      'IDEMPOTENCY_IN_PROGRESS',
+      'A request with this idempotency key is already in progress',
+    );
+  }
+
+  private async tryClaim(params: {
+    fingerprint: string;
+    key: string;
+    operation: string;
+    principalId: string;
+    staleTimeoutMs: number;
+  }): Promise<ClaimResult | null> {
     const { fingerprint, key, operation, principalId, staleTimeoutMs } = params;
 
     const inserted = await this.database.query<IdempotencyRow>(
@@ -51,8 +76,7 @@ export class PostgresIdempotencyStore implements IdempotencyStore {
          (principal_id, key, operation, request_fingerprint, status)
        VALUES ($4, $1, $2, $3, 'in_progress')
        ON CONFLICT (principal_id, key, operation) DO NOTHING
-       RETURNING key, operation, request_fingerprint, status, response_status_code,
-                 response_body, created_at, completed_at`,
+       RETURNING ${recordColumns}`,
       [key, operation, fingerprint, principalId],
     );
 
@@ -60,64 +84,79 @@ export class PostgresIdempotencyStore implements IdempotencyStore {
       return { action: 'proceed', record: toRecord(inserted.rows[0]) };
     }
 
-    const existing = await this.database.query<IdempotencyRow>(
-      `SELECT key, operation, request_fingerprint, status, response_status_code,
-              response_body, created_at, completed_at
-       FROM idempotency_records
-       WHERE key = $1 AND operation = $2 AND principal_id = $3`,
-      [key, operation, principalId],
-    );
+    const existing = await this.findRecord(key, operation, principalId);
+    if (!existing) return null;
 
-    const record = toRecord(existing.rows[0]!);
-
-    if (record.status === 'completed') {
-      if (record.requestFingerprint !== fingerprint) {
-        throw new IdempotencyError(
-          'IDEMPOTENCY_CONFLICT',
-          'Duplicate idempotency key with a different request body',
-        );
-      }
-      return { action: 'replay', record, response: toResponse(record) };
-    }
-
-    if (record.requestFingerprint !== fingerprint) {
+    if (existing.requestFingerprint !== fingerprint) {
       throw new IdempotencyError(
         'IDEMPOTENCY_CONFLICT',
         'Duplicate idempotency key with a different request body',
       );
     }
 
+    if (existing.status === 'completed') {
+      return { action: 'replay', record: existing, response: toResponse(existing) };
+    }
+
     const staleThreshold = new Date(Date.now() - staleTimeoutMs);
-    if (new Date(record.createdAt) < staleThreshold) {
-      await this.database.query(
-        `UPDATE idempotency_records
-         SET request_fingerprint = $3, created_at = now(), completed_at = NULL
-         WHERE key = $1 AND operation = $2 AND principal_id = $5 AND status = 'in_progress'
-           AND created_at < $4`,
-        [key, operation, fingerprint, staleThreshold.toISOString(), principalId],
-      );
-
+    if (new Date(existing.createdAt) < staleThreshold) {
+      // The conditional UPDATE is the whole reclaim: only the caller whose UPDATE actually moved
+      // the row owns the claim. Reading the row afterwards and proceeding on `in_progress` would
+      // let every concurrent reclaimer proceed -- the one that won *and* the ones that lost --
+      // and each would post its own transfer under the same key.
       const reclaimed = await this.database.query<IdempotencyRow>(
-        `SELECT key, operation, request_fingerprint, status, response_status_code,
-                response_body, created_at, completed_at
-         FROM idempotency_records
-         WHERE key = $1 AND operation = $2 AND principal_id = $3`,
-        [key, operation, principalId],
+        `UPDATE idempotency_records
+         SET created_at = now(), completed_at = NULL
+         WHERE key = $1 AND operation = $2 AND principal_id = $3 AND status = 'in_progress'
+           AND request_fingerprint = $4 AND created_at < $5
+         RETURNING ${recordColumns}`,
+        [key, operation, principalId, fingerprint, staleThreshold.toISOString()],
       );
-
-      if (reclaimed.rows[0] && reclaimed.rows[0].status === 'in_progress') {
+      if (reclaimed.rows[0]) {
         return { action: 'proceed', record: toRecord(reclaimed.rows[0]) };
       }
 
-      if (reclaimed.rows[0] && reclaimed.rows[0].status === 'completed') {
-        const completedRecord = toRecord(reclaimed.rows[0]);
-        return { action: 'replay', record: completedRecord, response: toResponse(completedRecord) };
+      // Lost the reclaim. Whoever won may already have finished, in which case its stored
+      // response is the answer; otherwise it is still running.
+      const current = await this.findRecord(key, operation, principalId);
+      if (!current) return null;
+      if (current.status === 'completed') {
+        return { action: 'replay', record: current, response: toResponse(current) };
       }
     }
 
     throw new IdempotencyError(
       'IDEMPOTENCY_IN_PROGRESS',
       'A request with this idempotency key is already in progress',
+    );
+  }
+
+  private async findRecord(
+    key: string,
+    operation: string,
+    principalId: string,
+  ): Promise<IdempotencyRecord | null> {
+    const result = await this.database.query<IdempotencyRow>(
+      `SELECT ${recordColumns}
+       FROM idempotency_records
+       WHERE key = $1 AND operation = $2 AND principal_id = $3`,
+      [key, operation, principalId],
+    );
+    const row = result.rows[0];
+    return row ? toRecord(row) : null;
+  }
+
+  public async release(params: {
+    key: string;
+    operation: string;
+    principalId: string;
+  }): Promise<void> {
+    // Only an unfinished claim is released. A completed record is a promise already made to the
+    // client and is never withdrawn here.
+    await this.database.query(
+      `DELETE FROM idempotency_records
+       WHERE key = $1 AND operation = $2 AND principal_id = $3 AND status = 'in_progress'`,
+      [params.key, params.operation, params.principalId],
     );
   }
 

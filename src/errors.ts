@@ -54,10 +54,42 @@ export interface ErrorResponse {
   };
 }
 
-export function errorHandler(error: Error, request: FastifyRequest, reply: FastifyReply): void {
+/** Status and public code/message for errors this service raises on purpose; else undefined. */
+function knownError(
+  error: unknown,
+): { code: string; message: string; statusCode: number } | undefined {
   if (error instanceof AppError) {
-    void reply.status(error.statusCode).send({
-      error: { code: error.code, message: error.message, requestId: request.id },
+    return { code: error.code, message: error.message, statusCode: error.statusCode };
+  }
+  if (error instanceof Error && isDomainError(error)) {
+    return { code: error.code, message: error.message, statusCode: domainErrorStatus[error.code] };
+  }
+  return undefined;
+}
+
+/**
+ * The exact response `errorHandler` would send for `error`, when that response is a deterministic
+ * answer to the request itself -- a known 4xx such as insufficient funds -- and so is safe to store
+ * as an idempotency key's stable result. Returns null for anything else (5xx, retry exhaustion,
+ * unexpected failures): those say nothing about the request, and a retry deserves a fresh attempt.
+ */
+export function replayableFailure(
+  error: unknown,
+  requestId: string,
+): { body: ErrorResponse; status: number } | null {
+  const known = knownError(error);
+  if (!known || known.statusCode < 400 || known.statusCode >= 500) return null;
+  return {
+    body: { error: { code: known.code, message: known.message, requestId } },
+    status: known.statusCode,
+  };
+}
+
+export function errorHandler(error: Error, request: FastifyRequest, reply: FastifyReply): void {
+  const known = knownError(error);
+  if (known) {
+    void reply.status(known.statusCode).send({
+      error: { code: known.code, message: known.message, requestId: request.id },
     } satisfies ErrorResponse);
     return;
   }
@@ -69,13 +101,6 @@ export function errorHandler(error: Error, request: FastifyRequest, reply: Fasti
         message: 'Request validation failed',
         requestId: request.id,
       },
-    } satisfies ErrorResponse);
-    return;
-  }
-
-  if (isDomainError(error)) {
-    void reply.status(domainErrorStatus[error.code]).send({
-      error: { code: error.code, message: error.message, requestId: request.id },
     } satisfies ErrorResponse);
     return;
   }

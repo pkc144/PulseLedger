@@ -13,6 +13,7 @@ let container: StartedPostgreSqlContainer | undefined;
 let pool: pg.Pool;
 let app: Awaited<ReturnType<typeof buildApp>>;
 let principal: TestPrincipal;
+let testDatabaseUrl: string;
 
 beforeAll(async () => {
   let databaseUrl = process.env.TEST_DATABASE_URL;
@@ -25,6 +26,7 @@ beforeAll(async () => {
     databaseUrl = container.getConnectionUri();
   }
 
+  testDatabaseUrl = databaseUrl;
   pool = createPool(databaseUrl);
   await runMigrations(pool);
   app = await buildApp({ adminApiKey: testAdminApiKey, database: pool });
@@ -188,6 +190,45 @@ describe('GET /v1/accounts/:id/entries', () => {
     expect(collected.every((entry) => entry.direction === 'debit')).toBe(true);
     const timestamps = collected.map((entry) => entry.createdAt);
     expect(timestamps).toEqual([...timestamps].sort());
+  });
+
+  it('paginates correctly when the database session is not in UTC', async () => {
+    // The cursor carries a timestamp labelled "Z". It used to be rendered in the session time
+    // zone, so on any non-UTC server page two started hours away from page one. CI's PostgreSQL
+    // runs in UTC, which is exactly why this needs its own session zone to catch.
+    const zonedUrl = new URL(testDatabaseUrl);
+    zonedUrl.searchParams.set('options', '-c TimeZone=Asia/Kolkata');
+    const zonedPool = createPool(zonedUrl.toString());
+    const zonedApp = await buildApp({ adminApiKey: testAdminApiKey, database: zonedPool });
+    try {
+      const zone = await zonedPool.query<{ TimeZone: string }>('SHOW TimeZone');
+      expect(zone.rows[0]!.TimeZone).toBe('Asia/Kolkata');
+
+      const accountId = await createFundedAccount(5);
+      const collected: string[] = [];
+      let cursor: string | undefined;
+      let pages = 0;
+      do {
+        const query = cursor ? `?limit=2&cursor=${encodeURIComponent(cursor)}` : '?limit=2';
+        const response = await zonedApp.inject({
+          method: 'GET',
+          url: `/v1/accounts/${accountId}/entries${query}`,
+          headers: { ...principal.authHeaders },
+        });
+        expect(response.statusCode).toBe(200);
+        const body = response.json<JournalEntriesResponse>();
+        collected.push(...body.entries.map((entry) => entry.id));
+        cursor = body.nextCursor ?? undefined;
+        pages += 1;
+        expect(pages).toBeLessThanOrEqual(10);
+      } while (cursor);
+
+      expect(pages).toBe(3);
+      expect(new Set(collected).size).toBe(5);
+    } finally {
+      await zonedApp.close();
+      await zonedPool.end();
+    }
   });
 
   it('respects a custom limit', async () => {

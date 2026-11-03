@@ -38,8 +38,8 @@ export class OutboxWorker {
 
   private running = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private stopped: Promise<void> | null = null;
-  private resolveStopped: (() => void) | null = null;
+  /** The poll currently executing, if any. `stop()` waits on it. */
+  private inFlight: Promise<void> | null = null;
 
   public constructor(store: OutboxStore, config: OutboxWorkerConfig = {}) {
     this.store = store;
@@ -60,21 +60,22 @@ export class OutboxWorker {
     this.schedulePoll();
   }
 
+  /**
+   * Stops scheduling polls and resolves only once any poll already under way has finished, so a
+   * caller that closes the database pool afterwards never pulls it out from under a claimed
+   * batch. (An interrupted batch would still be redelivered once its lease expires, but only
+   * after the full lease -- minutes of delay on every deploy, plus a spurious error.)
+   */
   public async stop(): Promise<void> {
-    if (!this.running) return;
-    this.running = false;
-    this.telemetry.shuttingDown();
+    if (this.running) {
+      this.running = false;
+      this.telemetry.shuttingDown();
+    }
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
     }
-    if (!this.stopped) {
-      this.stopped = new Promise((resolve) => {
-        this.resolveStopped = resolve;
-      });
-    }
-    this.resolveStopped?.();
-    return this.stopped;
+    await this.inFlight;
   }
 
   public isRunning(): boolean {
@@ -82,9 +83,15 @@ export class OutboxWorker {
   }
 
   private schedulePoll(): void {
-    if (!this.running) return;
+    // One poll chain at most: a restart while a poll is still running is picked up when that
+    // poll finishes, rather than starting a second, concurrent chain.
+    if (!this.running || this.timer || this.inFlight) return;
     this.timer = setTimeout(() => {
-      void this.poll();
+      this.timer = null;
+      this.inFlight = this.poll().finally(() => {
+        this.inFlight = null;
+        this.schedulePoll();
+      });
     }, this.pollIntervalMs);
   }
 
@@ -103,12 +110,6 @@ export class OutboxWorker {
       });
     } catch (error) {
       this.telemetry.claimError(error);
-    } finally {
-      if (this.running) {
-        this.schedulePoll();
-      } else {
-        this.resolveStopped?.();
-      }
     }
   }
 
