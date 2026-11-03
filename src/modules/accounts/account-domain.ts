@@ -9,6 +9,9 @@ export interface Account {
   status: 'active' | 'frozen' | 'closed';
 }
 
+/** Upper bound on `GET /v1/accounts`: a demo principal holds a handful of accounts, not thousands. */
+export const ownedAccountsMaxLimit = 100;
+
 export interface CreateAccountInput {
   currency: SupportedCurrency;
 }
@@ -21,9 +24,11 @@ export interface CreateAccountInput {
 export interface AccountStore {
   create(input: CreateAccountInput, ownerPrincipalId: string): Promise<Account>;
   findOwnedById(id: string, ownerPrincipalId: string): Promise<Account | null>;
+  listOwned(ownerPrincipalId: string, limit: number): Promise<Account[]>;
 }
 
 export interface AccountApplication {
   create(input: CreateAccountInput, ownerPrincipalId: string): Promise<Account>;
   findOwnedById(id: string, ownerPrincipalId: string): Promise<Account | null>;
+  listOwned(ownerPrincipalId: string): Promise<Account[]>;
 }

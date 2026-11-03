@@ -39,6 +39,7 @@ Errors always have the same shape:
 
 | Method | Path                                | Auth     | Purpose                               |
 | ------ | ----------------------------------- | -------- | ------------------------------------- |
+| `GET`  | `/v1/accounts`                      | Customer | List the accounts you own             |
 | `POST` | `/v1/accounts`                      | Customer | Create a zero-balance account you own |
 | `GET`  | `/v1/accounts/:id`                  | Customer | Read one of your accounts             |
 | `GET`  | `/v1/accounts/:id/entries`          | Customer | Cursor-paginated journal entries      |
@@ -201,6 +202,27 @@ content-type: application/json; charset=utf-8
 
 New accounts always start at `"0"`. There is no API that sets a balance directly — money only
 enters through a journaled treasury posting (`/v1/admin/fund`).
+
+## `GET /v1/accounts`
+
+Lists the caller's own accounts, oldest first, capped at 100. Treasuries and other principals'
+accounts never appear — the ownership filter is in the SQL, exactly as for the single-account read.
+
+```json
+{
+  "accounts": [
+    {
+      "id": "97a673f8-be2c-4226-a61e-6718e645b594",
+      "currency": "INR",
+      "status": "active",
+      "balanceMinor": "250000",
+      "createdAt": "2026-08-16T10:29:20.116Z"
+    }
+  ]
+}
+```
+
+A principal with no accounts gets `{ "accounts": [] }`.
 
 ## `GET /v1/accounts/:id`
 

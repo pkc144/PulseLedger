@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **`GET /v1/accounts`** lists the caller's own accounts (oldest first, capped at 100), with the
+  same SQL-level ownership filter as the single-account read. Treasuries never appear.
+
 ### Fixes
 
 - **One idempotency key could post two transfers.** Reclaiming a stale `in_progress` claim ran an

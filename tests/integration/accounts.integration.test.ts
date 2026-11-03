@@ -87,6 +87,44 @@ describe('accounts with PostgreSQL', () => {
     });
   });
 
+  it('lists only the caller’s own accounts, oldest first, and never a treasury', async () => {
+    const caller = await createTestPrincipal(pool, 'list-caller');
+    const other = await createTestPrincipal(pool, 'list-other');
+
+    const createAs = async (headers: { authorization: string }, currency: string) =>
+      (
+        await app.inject({ method: 'POST', url: '/v1/accounts', headers, payload: { currency } })
+      ).json<{ id: string }>().id;
+
+    const first = await createAs(caller.authHeaders, 'INR');
+    const second = await createAs(caller.authHeaders, 'USD');
+    await createAs(other.authHeaders, 'INR');
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/accounts',
+      headers: { ...caller.authHeaders },
+    });
+    expect(response.statusCode).toBe(200);
+    const body = response.json<{ accounts: { currency: string; id: string }[] }>();
+    expect(body.accounts.map(({ id }) => id)).toEqual([first, second]);
+    expect(body.accounts.map(({ currency }) => currency)).toEqual(['INR', 'USD']);
+  });
+
+  it('returns an empty list for a principal with no accounts, and 401 without a key', async () => {
+    const fresh = await createTestPrincipal(pool, 'list-empty');
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/accounts',
+      headers: { ...fresh.authHeaders },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ accounts: [] });
+
+    const anonymous = await app.inject({ method: 'GET', url: '/v1/accounts' });
+    expect(anonymous.statusCode).toBe(401);
+  });
+
   it('does not expose treasury accounts through the customer endpoint', async () => {
     const response = await app.inject({
       method: 'GET',

@@ -4,6 +4,7 @@ import type {
   AccountStore,
   CreateAccountInput,
 } from './account-domain.js';
+import { ownedAccountsMaxLimit } from './account-domain.js';
 
 export class AccountService implements AccountApplication {
   public constructor(private readonly store: AccountStore) {}
@@ -14,5 +15,9 @@ export class AccountService implements AccountApplication {
 
   public async findOwnedById(id: string, ownerPrincipalId: string): Promise<Account | null> {
     return await this.store.findOwnedById(id, ownerPrincipalId);
+  }
+
+  public async listOwned(ownerPrincipalId: string): Promise<Account[]> {
+    return await this.store.listOwned(ownerPrincipalId, ownedAccountsMaxLimit);
   }
 }

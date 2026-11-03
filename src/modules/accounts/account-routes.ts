@@ -62,7 +62,20 @@ const accountResponseSchema = {
   },
 } as const;
 
+const accountListResponseSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['accounts'],
+  properties: { accounts: { type: 'array', items: accountResponseSchema } },
+} as const;
+
 export const accountRoutes: FastifyPluginAsync<AccountRouteOptions> = async (app, options) => {
+  app.get(
+    '/v1/accounts',
+    { schema: { response: { 200: accountListResponseSchema } } },
+    async (request) => ({ accounts: await options.service.listOwned(principalOf(request)) }),
+  );
+
   app.post<{ Body: { currency: SupportedCurrency } }>(
     '/v1/accounts',
     {

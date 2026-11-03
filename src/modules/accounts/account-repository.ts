@@ -51,4 +51,18 @@ export class PostgresAccountStore implements AccountStore {
     const row = result.rows[0];
     return row ? toAccount(row) : null;
   }
+
+  public async listOwned(ownerPrincipalId: string, limit: number): Promise<Account[]> {
+    // Same ownership filter as findOwnedById, served by accounts_owner_idx. Oldest first, so a
+    // principal's first account stays first in every listing.
+    const result = await this.database.query<AccountRow>(
+      `SELECT id, currency, status, balance_minor::text, created_at
+       FROM accounts
+       WHERE owner_principal_id = $1 AND is_treasury = false
+       ORDER BY created_at, id
+       LIMIT $2`,
+      [ownerPrincipalId, limit],
+    );
+    return result.rows.map(toAccount);
+  }
 }
