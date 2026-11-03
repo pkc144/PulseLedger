@@ -12,6 +12,7 @@ describe('loadConfig', () => {
     expect(loadConfig(baseEnvironment)).toEqual({
       adminApiKey: validAdminApiKey,
       databaseUrl: 'postgresql://localhost/pulseledger',
+      firebaseProjectId: null,
       host: '0.0.0.0',
       logLevel: 'info',
       nodeEnv: 'development',
@@ -70,5 +71,23 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...baseEnvironment, REQUEST_BODY_LIMIT_BYTES: '0' })).toThrow(
       'REQUEST_BODY_LIMIT_BYTES must be a positive integer',
     );
+  });
+
+  it('reads an optional Firebase project ID, treating blank as disabled', () => {
+    expect(
+      loadConfig({ ...baseEnvironment, FIREBASE_PROJECT_ID: 'pulseledger-904fa' })
+        .firebaseProjectId,
+    ).toBe('pulseledger-904fa');
+    expect(loadConfig({ ...baseEnvironment, FIREBASE_PROJECT_ID: '  ' }).firebaseProjectId).toBe(
+      null,
+    );
+  });
+
+  it('rejects a Firebase project ID that could not be a real one', () => {
+    for (const bad of ['Has-Caps', 'a/b', 'short', 'x'.repeat(31), 'evil.com/x']) {
+      expect(() => loadConfig({ ...baseEnvironment, FIREBASE_PROJECT_ID: bad })).toThrow(
+        'FIREBASE_PROJECT_ID is not a valid Firebase project ID',
+      );
+    }
   });
 });

@@ -4,6 +4,7 @@ import type { RequestLimitsConfig } from './config.js';
 import { errorHandler } from './errors.js';
 import { requireAdminApiKey } from './infrastructure/http/admin-auth.js';
 import { requireApiKey } from './infrastructure/http/api-key-auth.js';
+import type { FirebaseTokenVerifier } from './infrastructure/http/firebase-id-token.js';
 import { prometheusContentType, renderPrometheusMetrics } from './infrastructure/http/metrics.js';
 import { withRedaction } from './infrastructure/http/logging.js';
 import { PostgresIdempotencyStore } from './modules/idempotency/idempotency-repository.js';
@@ -11,7 +12,7 @@ import { IdempotencyService } from './modules/idempotency/idempotency-service.js
 import { PostgresAccountStore } from './modules/accounts/account-repository.js';
 import { accountRoutes } from './modules/accounts/account-routes.js';
 import { AccountService } from './modules/accounts/account-service.js';
-import { administratorPrincipalId } from './modules/auth/auth-domain.js';
+import { administratorPrincipalId, apiKeyTag } from './modules/auth/auth-domain.js';
 import { PostgresAuthStore } from './modules/auth/auth-repository.js';
 import { authRoutes } from './modules/auth/auth-routes.js';
 import { AuthService } from './modules/auth/auth-service.js';
@@ -64,6 +65,8 @@ const metricsResponseSchema = {
 export interface BuildAppOptions {
   adminApiKey: string;
   database: TransactionalDatabase;
+  /** Accepts Firebase ID tokens as customer bearer credentials alongside API keys when set. */
+  firebaseTokenVerifier?: FirebaseTokenVerifier;
   logger?: boolean | { level: string };
   outboxStore?: OutboxStore;
   requestLimits?: RequestLimitsConfig;
@@ -121,9 +124,17 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   // admin routes below are guarded. The route files never import authentication; they read the
   // resolved principal from the request and use it to scope every query.
   await app.register(async (customerApp) => {
+    // One bearer slot, two credential kinds: anything shaped like a PulseLedger key takes the
+    // API-key path; anything else is a Firebase ID token when Firebase is configured. With
+    // Firebase off, every bearer goes to the API-key path and fails exactly as it always has.
+    const verifyFirebaseToken = options.firebaseTokenVerifier;
     customerApp.addHook(
       'onRequest',
-      requireApiKey(async (secret) => await authService.authenticate(secret)),
+      requireApiKey(async (secret) =>
+        secret.startsWith(apiKeyTag) || !verifyFirebaseToken
+          ? await authService.authenticate(secret)
+          : await authService.authenticateIdentity(await verifyFirebaseToken(secret)),
+      ),
     );
 
     await customerApp.register(accountRoutes, {

@@ -1,6 +1,7 @@
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { createPool } from './infrastructure/database/pool.js';
+import { createFirebaseTokenVerifier } from './infrastructure/http/firebase-id-token.js';
 import { PostgresAuditConsumerStore } from './modules/audit/audit-repository.js';
 import { AuditConsumerService } from './modules/audit/audit-service.js';
 import { PostgresOutboxStore } from './modules/outbox/outbox-repository.js';
@@ -21,6 +22,11 @@ const auditConsumer = new AuditConsumerService(new PostgresAuditConsumerStore(po
 const app = await buildApp({
   adminApiKey: config.adminApiKey,
   database: pool,
+  ...(config.firebaseProjectId
+    ? {
+        firebaseTokenVerifier: createFirebaseTokenVerifier({ projectId: config.firebaseProjectId }),
+      }
+    : {}),
   logger: { level: config.logLevel },
   outboxStore,
   requestLimits: config.requestLimits,

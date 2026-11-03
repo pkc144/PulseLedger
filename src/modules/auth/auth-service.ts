@@ -5,7 +5,9 @@ import {
   apiKeySecretBytes,
   apiKeyTag,
   AuthError,
+  principalNameMaxLength,
   type AuthApplication,
+  type ExternalIdentity,
   type AuthStore,
   type IssuedApiKey,
   type Principal,
@@ -54,6 +56,24 @@ export class AuthService implements AuthApplication {
     return candidate.principal;
   }
 
+  public async authenticateIdentity(identity: ExternalIdentity): Promise<Principal> {
+    // Checked before any lookup or insert: an unverified email/password sign-up must not get as
+    // far as creating a principal, or anyone could claim an address they do not control.
+    if (!identity.emailVerified) {
+      throw new AuthError('EMAIL_NOT_VERIFIED', 'Verify your email address before signing in');
+    }
+
+    const principal =
+      (await this.store.findPrincipalByIdentity(identity.provider, identity.subject)) ??
+      (await this.store.createPrincipalForIdentity(identity, principalNameFor(identity)));
+
+    // Same single message as a bad API key: disabling a principal locks out every way in.
+    if (principal.status !== 'active') {
+      throw new AuthError('UNAUTHORIZED', 'Invalid credentials');
+    }
+    return principal;
+  }
+
   public async createPrincipal(name: string): Promise<Principal> {
     return await this.store.createPrincipal(name);
   }
@@ -75,4 +95,10 @@ export class AuthService implements AuthApplication {
       throw new AuthError('API_KEY_NOT_FOUND', 'API key not found');
     }
   }
+}
+
+function principalNameFor(identity: ExternalIdentity): string {
+  const name =
+    identity.displayName?.trim() || identity.email || `${identity.provider}:${identity.subject}`;
+  return name.slice(0, principalNameMaxLength);
 }

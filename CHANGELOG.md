@@ -4,6 +4,10 @@
 
 - **`GET /v1/accounts`** lists the caller's own accounts (oldest first, capped at 100), with the
   same SQL-level ownership filter as the single-account read. Treasuries never appear.
+- **Sign in with Firebase** — Google and email/password. With `FIREBASE_PROJECT_ID` set, the
+  customer guard accepts Firebase ID tokens alongside API keys, verified against Google's public
+  keys (no service account). First sign-in provisions a principal via `principal_identities`
+  (migration 012; race-safe, immutable). Unverified emails get `403 EMAIL_NOT_VERIFIED`.
 
 ### Fixes
 

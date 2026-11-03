@@ -21,6 +21,8 @@ export interface RequestLimitsConfig {
 export interface AppConfig {
   adminApiKey: string;
   databaseUrl: string;
+  /** Firebase project whose ID tokens are accepted as customer credentials; null disables it. */
+  firebaseProjectId: string | null;
   host: string;
   logLevel: string;
   nodeEnv: NodeEnvironment;
@@ -111,9 +113,17 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     'REQUEST_TIMEOUT_MS',
   );
 
+  const firebaseProjectId = environment.FIREBASE_PROJECT_ID?.trim() || null;
+  // Firebase project IDs are 6-30 chars of lowercase letters, digits, and hyphens. Validated here
+  // because the value is interpolated into the expected token issuer.
+  if (firebaseProjectId !== null && !/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(firebaseProjectId)) {
+    throw new Error('FIREBASE_PROJECT_ID is not a valid Firebase project ID');
+  }
+
   return {
     adminApiKey,
     databaseUrl,
+    firebaseProjectId,
     host: environment.HOST ?? '0.0.0.0',
     logLevel,
     nodeEnv: nodeEnv as NodeEnvironment,

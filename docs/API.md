@@ -109,6 +109,24 @@ curl http://localhost:3000/v1/accounts/97a673f8-... \
   -H 'authorization: Bearer pl_live__2ZUdpDEGB79i5fTShKycZMeEzuTC99IeLz7hFRKc_M'
 ```
 
+### Signing in with Firebase (Google or email/password)
+
+When the server has `FIREBASE_PROJECT_ID` set, a **Firebase Authentication ID token** is accepted
+in the same `Authorization: Bearer` slot as an API key. Anything starting `pl_live_` is treated as
+an API key; anything else as an ID token.
+
+- The token is verified without the Admin SDK: RS256 signature against Google's published keys,
+  issuer `https://securetoken.google.com/<project>`, audience `<project>`, unexpired, `auth_time`
+  in the past, non-empty `sub`.
+- The first request from a Firebase user creates a principal for them, mapped by Firebase UID
+  (never by email) in `principal_identities`. Concurrent first requests produce exactly one
+  principal. The mapping is immutable at the database level.
+- **The email must be verified.** Otherwise: `403 EMAIL_NOT_VERIFIED`, and no principal is created.
+- A bad, expired, or wrong-project token is `401 UNAUTHORIZED` (`Invalid or expired ID token`).
+  If Google's keys cannot be fetched the answer is `503 AUTH_PROVIDER_UNAVAILABLE` — retry, do not
+  sign the user out.
+- Ownership, idempotency scoping, and `404`-not-`403` rules are identical to API-key callers.
+
 ### Revoking a key
 
 ```bash

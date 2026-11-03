@@ -1,8 +1,9 @@
-import type { Database } from '../../ports/database.js';
+import type { TransactionalDatabase } from '../../ports/database.js';
 import type {
   ApiKeyCandidate,
   ApiKeyRecord,
   AuthStore,
+  ExternalIdentity,
   Principal,
   PrincipalStatus,
 } from './auth-domain.js';
@@ -47,7 +48,7 @@ function toApiKeyRecord(row: ApiKeyRow): ApiKeyRecord {
 }
 
 export class PostgresAuthStore implements AuthStore {
-  public constructor(private readonly database: Database) {}
+  public constructor(private readonly database: TransactionalDatabase) {}
 
   public async createPrincipal(name: string): Promise<Principal> {
     const result = await this.database.query<PrincipalRow>(
@@ -110,5 +111,63 @@ export class PostgresAuthStore implements AuthStore {
       [id],
     );
     return (result.rowCount ?? 0) > 0;
+  }
+
+  public async findPrincipalByIdentity(
+    provider: ExternalIdentity['provider'],
+    subject: string,
+  ): Promise<Principal | null> {
+    const result = await this.database.query<PrincipalRow>(
+      `SELECT principal.id, principal.name, principal.status, principal.created_at
+       FROM principal_identities AS identity
+       JOIN principals AS principal ON principal.id = identity.principal_id
+       WHERE identity.provider = $1 AND identity.subject = $2`,
+      [provider, subject],
+    );
+    const row = result.rows[0];
+    return row ? toPrincipal(row) : null;
+  }
+
+  public async createPrincipalForIdentity(
+    identity: ExternalIdentity,
+    name: string,
+  ): Promise<Principal> {
+    // Principal and mapping commit together or not at all. A concurrent first sign-in for the same
+    // identity blocks on the primary key until the other transaction commits, then inserts nothing;
+    // this transaction rolls back its own principal and returns the winner's. No orphan principal
+    // survives either way.
+    const connection = await this.database.connect();
+    let created: Principal | undefined;
+    try {
+      await connection.query('BEGIN');
+      const principal = await connection.query<PrincipalRow>(
+        `INSERT INTO principals (name) VALUES ($1)
+         RETURNING id, name, status, created_at`,
+        [name],
+      );
+      const mapping = await connection.query(
+        `INSERT INTO principal_identities (provider, subject, principal_id, email)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (provider, subject) DO NOTHING
+         RETURNING principal_id`,
+        [identity.provider, identity.subject, principal.rows[0]!.id, identity.email],
+      );
+      if (mapping.rowCount === 1) {
+        await connection.query('COMMIT');
+        created = toPrincipal(principal.rows[0]!);
+      } else {
+        await connection.query('ROLLBACK');
+      }
+    } catch (error) {
+      await connection.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      connection.release();
+    }
+
+    if (created) return created;
+    const winner = await this.findPrincipalByIdentity(identity.provider, identity.subject);
+    if (!winner) throw new Error('identity mapping vanished after a conflicting insert');
+    return winner;
   }
 }
