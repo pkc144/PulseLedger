@@ -4,6 +4,7 @@ import type {
   Account,
   AccountStore,
   CreateAccountInput,
+  OwnedAccountsCursor,
   SupportedCurrency,
 } from './account-domain.js';
 
@@ -52,17 +53,31 @@ export class PostgresAccountStore implements AccountStore {
     return row ? toAccount(row) : null;
   }
 
-  public async listOwned(ownerPrincipalId: string, limit: number): Promise<Account[]> {
+  public async listOwned(
+    ownerPrincipalId: string,
+    page: { cursor?: OwnedAccountsCursor | undefined; limit: number },
+  ): Promise<{ accounts: Account[]; nextCursor: OwnedAccountsCursor | null }> {
     // Same ownership filter as findOwnedById, served by accounts_owner_idx. Oldest first, so a
-    // principal's first account stays first in every listing.
-    const result = await this.database.query<AccountRow>(
-      `SELECT id, currency, status, balance_minor::text, created_at
+    // principal's first account stays first in every listing. Keyset-paginated on
+    // (created_at, id), fetching one extra row to learn whether another page exists. The cursor
+    // timestamp is rendered in UTC explicitly -- see the journal-entries cursor for why.
+    const result = await this.database.query<AccountRow & { created_at_cursor: string }>(
+      `SELECT id, currency, status, balance_minor::text, created_at,
+              to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+                AS created_at_cursor
        FROM accounts
        WHERE owner_principal_id = $1 AND is_treasury = false
+         AND ($3::timestamptz IS NULL OR (created_at, id) > ($3::timestamptz, $4::uuid))
        ORDER BY created_at, id
        LIMIT $2`,
-      [ownerPrincipalId, limit],
+      [ownerPrincipalId, page.limit + 1, page.cursor?.createdAt ?? null, page.cursor?.id ?? null],
     );
-    return result.rows.map(toAccount);
+    const hasMore = result.rows.length > page.limit;
+    const rows = hasMore ? result.rows.slice(0, page.limit) : result.rows;
+    const last = rows.at(-1);
+    return {
+      accounts: rows.map(toAccount),
+      nextCursor: hasMore && last ? { createdAt: last.created_at_cursor, id: last.id } : null,
+    };
   }
 }

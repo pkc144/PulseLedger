@@ -1,4 +1,5 @@
 import type { TransactionalDatabase } from '../../ports/database.js';
+import { withTransaction } from '../../ports/transaction.js';
 import type {
   ApiKeyCandidate,
   ApiKeyRecord,
@@ -46,6 +47,9 @@ function toApiKeyRecord(row: ApiKeyRow): ApiKeyRecord {
     revokedAt: row.revoked_at?.toISOString() ?? null,
   };
 }
+
+/** Internal signal: a concurrent first sign-in already mapped this identity. */
+class IdentityAlreadyMapped extends Error {}
 
 export class PostgresAuthStore implements AuthStore {
   public constructor(private readonly database: TransactionalDatabase) {}
@@ -136,33 +140,27 @@ export class PostgresAuthStore implements AuthStore {
     // identity blocks on the primary key until the other transaction commits, then inserts nothing;
     // this transaction rolls back its own principal and returns the winner's. No orphan principal
     // survives either way.
-    const connection = await this.database.connect();
     let created: Principal | undefined;
     try {
-      await connection.query('BEGIN');
-      const principal = await connection.query<PrincipalRow>(
-        `INSERT INTO principals (name) VALUES ($1)
+      created = await withTransaction(this.database, async (connection) => {
+        const principal = await connection.query<PrincipalRow>(
+          `INSERT INTO principals (name) VALUES ($1)
          RETURNING id, name, status, created_at`,
-        [name],
-      );
-      const mapping = await connection.query(
-        `INSERT INTO principal_identities (provider, subject, principal_id, email)
+          [name],
+        );
+        const mapping = await connection.query(
+          `INSERT INTO principal_identities (provider, subject, principal_id, email)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (provider, subject) DO NOTHING
          RETURNING principal_id`,
-        [identity.provider, identity.subject, principal.rows[0]!.id, identity.email],
-      );
-      if (mapping.rowCount === 1) {
-        await connection.query('COMMIT');
-        created = toPrincipal(principal.rows[0]!);
-      } else {
-        await connection.query('ROLLBACK');
-      }
+          [identity.provider, identity.subject, principal.rows[0]!.id, identity.email],
+        );
+        // Lost the race: throwing rolls back this transaction's own principal row.
+        if (mapping.rowCount !== 1) throw new IdentityAlreadyMapped();
+        return toPrincipal(principal.rows[0]!);
+      });
     } catch (error) {
-      await connection.query('ROLLBACK').catch(() => undefined);
-      throw error;
-    } finally {
-      connection.release();
+      if (!(error instanceof IdentityAlreadyMapped)) throw error;
     }
 
     if (created) return created;

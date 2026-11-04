@@ -138,6 +138,13 @@ function SendMoney({
       intentKey.current = crypto.randomUUID();
       onSent();
     } catch (caught) {
+      // A non-retryable 4xx (insufficient funds, inactive account, ...) is stored by the server
+      // as this key's final answer and would be replayed to every resend. The intent has been
+      // decided, so the next submission is a new intent with a new key. Timeouts and retryable
+      // failures keep the key, which is what makes "Retry safely" safe.
+      if (caught instanceof ApiError && caught.isFinalAnswer) {
+        intentKey.current = crypto.randomUUID();
+      }
       setError(caught);
     } finally {
       setBusy(false);
@@ -258,6 +265,8 @@ function History({
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    // A reload starts clean: an earlier failure must not stay on screen over fresh entries.
+    setError(undefined);
     api.listEntries(accountId).then(
       (page) => {
         if (cancelled) return;
@@ -275,6 +284,7 @@ function History({
   async function loadMore() {
     if (!cursor) return;
     setLoading(true);
+    setError(undefined);
     try {
       const page = await api.listEntries(accountId, cursor);
       setEntries((previous) => [...previous, ...page.entries]);

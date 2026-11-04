@@ -62,6 +62,12 @@ their own principal on first sign-in, so their accounts are private to them.
   starts a new key.
 - **Credentials live in `sessionStorage`** — they survive a reload and are gone when the tab closes.
   A `401` clears the stored key and returns you to sign-in.
+- **Firebase sign-ins follow the same rule.** Firebase Auth is initialised with session persistence
+  rather than its default (IndexedDB, which outlives the browser), so on a shared machine closing
+  the tab signs the customer out — the next visitor never opens `/app` as them.
+- **Every money-moving form uses a per-intent `Idempotency-Key`** (Send money and admin Fund): kept
+  across a retry after a timeout or `503`, replaced by any edit, a success, or a final `4xx`
+  answer, which the server would otherwise replay to every resend of that key.
 - The admin console only knows about principals and keys created in the current page session: the
   API has no endpoint to list them.
 

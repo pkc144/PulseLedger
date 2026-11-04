@@ -6,7 +6,7 @@ import {
   type LedgerApplication,
 } from '../ledger/ledger-domain.js';
 import type { AccountApplication, SupportedCurrency } from './account-domain.js';
-import { supportedCurrencies } from './account-domain.js';
+import { ownedAccountsMaxLimit, supportedCurrencies } from './account-domain.js';
 
 interface AccountRouteOptions {
   ledger: LedgerApplication;
@@ -65,15 +65,34 @@ const accountResponseSchema = {
 const accountListResponseSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['accounts'],
-  properties: { accounts: { type: 'array', items: accountResponseSchema } },
+  required: ['accounts', 'nextCursor'],
+  properties: {
+    accounts: { type: 'array', items: accountResponseSchema },
+    nextCursor: { type: ['string', 'null'] },
+  },
 } as const;
 
 export const accountRoutes: FastifyPluginAsync<AccountRouteOptions> = async (app, options) => {
-  app.get(
+  app.get<{ Querystring: { cursor?: string; limit?: number } }>(
     '/v1/accounts',
-    { schema: { response: { 200: accountListResponseSchema } } },
-    async (request) => ({ accounts: await options.service.listOwned(principalOf(request)) }),
+    {
+      schema: {
+        querystring: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            cursor: { type: 'string', minLength: 1 },
+            limit: { type: 'integer', minimum: 1, maximum: ownedAccountsMaxLimit },
+          },
+        },
+        response: { 200: accountListResponseSchema },
+      },
+    },
+    async (request) =>
+      await options.service.listOwned(principalOf(request), {
+        cursor: request.query.cursor,
+        limit: request.query.limit,
+      }),
   );
 
   app.post<{ Body: { currency: SupportedCurrency } }>(

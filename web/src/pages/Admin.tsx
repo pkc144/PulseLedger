@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Button,
@@ -12,6 +12,7 @@ import {
 } from '../components/ui';
 import {
   api,
+  ApiError,
   type FundingResult,
   type IssuedApiKey,
   type Principal,
@@ -142,6 +143,15 @@ function Fund() {
   const [error, setError] = useState<unknown>();
   const [result, setResult] = useState<FundingResult>();
   const amountMinor = parseMajorToMinor(amount);
+  // One key per funding *intent*, exactly as for customer transfers: kept across a retry after a
+  // timeout (so the account is never credited twice), replaced by any edit, a success, or a
+  // final answer from the server.
+  const intentKey = useRef(crypto.randomUUID());
+
+  function edit(apply: () => void) {
+    apply();
+    intentKey.current = crypto.randomUUID();
+  }
 
   async function fund(event: React.FormEvent) {
     event.preventDefault();
@@ -150,8 +160,12 @@ function Fund() {
     setError(undefined);
     setResult(undefined);
     try {
-      setResult(await api.fund(accountId.trim(), amountMinor));
+      setResult(await api.fund(accountId.trim(), amountMinor, intentKey.current));
+      intentKey.current = crypto.randomUUID();
     } catch (caught) {
+      if (caught instanceof ApiError && caught.isFinalAnswer) {
+        intentKey.current = crypto.randomUUID();
+      }
       setError(caught);
     } finally {
       setBusy(false);
@@ -164,7 +178,7 @@ function Fund() {
         <Field
           label="Account ID"
           value={accountId}
-          onChange={(event) => setAccountId(event.target.value)}
+          onChange={(event) => edit(() => setAccountId(event.target.value))}
           spellCheck={false}
           required
         />
@@ -173,7 +187,7 @@ function Fund() {
           inputMode="decimal"
           placeholder="2500.00"
           value={amount}
-          onChange={(event) => setAmount(event.target.value)}
+          onChange={(event) => edit(() => setAmount(event.target.value))}
           hint={
             amount && !amountMinor
               ? 'Enter a positive amount with up to two decimals.'

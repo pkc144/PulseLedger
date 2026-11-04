@@ -89,6 +89,14 @@ export class ApiError extends Error {
   get retryable(): boolean {
     return this.code === 'TRANSFER_RETRY_EXHAUSTED' || this.code === 'IDEMPOTENCY_IN_PROGRESS';
   }
+
+  /**
+   * The server decided this request: a non-retryable 4xx is stored as the Idempotency-Key's
+   * result and replayed to every retry of that key. Resending needs a new key.
+   */
+  get isFinalAnswer(): boolean {
+    return this.status >= 400 && this.status < 500 && !this.retryable;
+  }
 }
 
 type Auth = 'customer' | 'admin' | 'none';
@@ -166,7 +174,24 @@ function safeJson(text: string): unknown {
 
 export const api = {
   // Customer
-  listAccounts: () => request<{ accounts: Account[] }>('GET', '/v1/accounts', { auth: 'customer' }),
+  /** Every account the caller owns, following `nextCursor` so a long list is never cut short. */
+  listAccounts: async (): Promise<{ accounts: Account[] }> => {
+    const accounts: Account[] = [];
+    let cursor: string | null = null;
+    // Bounded so a misbehaving server cannot spin the browser: 50 pages of 100.
+    for (let page = 0; page < 50; page += 1) {
+      const query: string = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+      const result: { accounts: Account[]; nextCursor: string | null } = await request(
+        'GET',
+        `/v1/accounts${query}`,
+        { auth: 'customer' },
+      );
+      accounts.push(...result.accounts);
+      cursor = result.nextCursor;
+      if (!cursor) break;
+    }
+    return { accounts };
+  },
   createAccount: (currency: Currency) =>
     request<Account>('POST', '/v1/accounts', { auth: 'customer', body: { currency } }),
   getAccount: (id: string) =>
@@ -207,10 +232,11 @@ export const api = {
       `/v1/admin/api-keys/${encodeURIComponent(keyId)}/revoke`,
       { auth: 'admin' },
     ),
-  fund: (accountId: string, amountMinor: string) =>
+  fund: (accountId: string, amountMinor: string, idempotencyKey: string) =>
     request<FundingResult>('POST', '/v1/admin/fund', {
       auth: 'admin',
       body: { accountId, amountMinor },
+      headers: { 'idempotency-key': idempotencyKey },
     }),
   reconcile: () => request<ReconciliationReport>('POST', '/v1/admin/reconcile', { auth: 'admin' }),
   metrics: () =>

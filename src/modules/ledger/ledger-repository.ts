@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Database, TransactionalDatabase } from '../../ports/database.js';
+import { withTransaction } from '../../ports/transaction.js';
 import { IdempotencyError } from '../idempotency/idempotency-domain.js';
 import { outboxCurrentEventVersion, type OutboxStore } from '../outbox/outbox-domain.js';
 import {
@@ -143,9 +144,7 @@ export class PostgresLedgerStore implements LedgerStore {
     // or a crash between the two could move money without its event or its stored response.
     if (!this.outboxStore && !idempotency) return await postWith(this.database, input);
 
-    const connection = await this.database.connect();
-    try {
-      await connection.query('BEGIN');
+    return await withTransaction(this.database, async (connection) => {
       const posted = await postWith(connection, input);
 
       if (this.outboxStore) {
@@ -190,18 +189,8 @@ export class PostgresLedgerStore implements LedgerStore {
         }
       }
 
-      await connection.query('COMMIT');
       return posted;
-    } catch (error) {
-      try {
-        await connection.query('ROLLBACK');
-      } catch {
-        // Preserve the original failure.
-      }
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 }
 

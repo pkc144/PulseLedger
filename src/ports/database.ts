@@ -17,7 +17,8 @@ export interface Database {
 }
 
 export interface DatabaseConnection extends Database {
-  release(): void;
+  /** Passing an error tells the pool the connection is unusable and must be destroyed. */
+  release(error?: Error): void;
 }
 
 export interface TransactionalDatabase extends Database {

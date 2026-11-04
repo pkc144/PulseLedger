@@ -4,7 +4,13 @@ import type {
   AccountStore,
   CreateAccountInput,
 } from './account-domain.js';
-import { ownedAccountsMaxLimit } from './account-domain.js';
+import {
+  decodeOwnedAccountsCursor,
+  encodeOwnedAccountsCursor,
+  ownedAccountsDefaultLimit,
+  ownedAccountsMaxLimit,
+  type OwnedAccountsPage,
+} from './account-domain.js';
 
 export class AccountService implements AccountApplication {
   public constructor(private readonly store: AccountStore) {}
@@ -17,7 +23,22 @@ export class AccountService implements AccountApplication {
     return await this.store.findOwnedById(id, ownerPrincipalId);
   }
 
-  public async listOwned(ownerPrincipalId: string): Promise<Account[]> {
-    return await this.store.listOwned(ownerPrincipalId, ownedAccountsMaxLimit);
+  public async listOwned(
+    ownerPrincipalId: string,
+    options: { cursor?: string | undefined; limit?: number | undefined } = {},
+  ): Promise<OwnedAccountsPage> {
+    const requested = options.limit;
+    const limit =
+      requested !== undefined && Number.isInteger(requested) && requested >= 1
+        ? Math.min(requested, ownedAccountsMaxLimit)
+        : ownedAccountsDefaultLimit;
+    const page = await this.store.listOwned(ownerPrincipalId, {
+      cursor: options.cursor ? decodeOwnedAccountsCursor(options.cursor) : undefined,
+      limit,
+    });
+    return {
+      accounts: page.accounts,
+      nextCursor: page.nextCursor ? encodeOwnedAccountsCursor(page.nextCursor) : null,
+    };
   }
 }

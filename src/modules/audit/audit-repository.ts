@@ -1,4 +1,5 @@
 import type { TransactionalDatabase } from '../../ports/database.js';
+import { withTransaction } from '../../ports/transaction.js';
 import {
   auditConsumerName,
   type AuditConsumeInput,
@@ -10,10 +11,7 @@ export class PostgresAuditConsumerStore implements AuditConsumerStore {
   public constructor(private readonly database: TransactionalDatabase) {}
 
   public async consume(input: AuditConsumeInput): Promise<AuditConsumeResult> {
-    const connection = await this.database.connect();
-    try {
-      await connection.query('BEGIN');
-
+    return await withTransaction(this.database, async (connection) => {
       // Claim the (consumer, event) pair first. A conflict means another delivery of the
       // same event already claimed it (either earlier, or concurrently right now) — this
       // INSERT is the atomic dedup boundary, race-safe under real concurrency.
@@ -25,10 +23,8 @@ export class PostgresAuditConsumerStore implements AuditConsumerStore {
         [auditConsumerName, input.eventId],
       );
 
-      if (claimed.rowCount === 0) {
-        await connection.query('ROLLBACK');
-        return { duplicate: true };
-      }
+      // A lost claim wrote nothing, so committing the empty transaction is a no-op.
+      if (claimed.rowCount === 0) return { duplicate: true };
 
       // Only the claiming delivery reaches here, and it does so in the same transaction as
       // the claim: the inbox row and the audit effect commit together or not at all.
@@ -44,17 +40,7 @@ export class PostgresAuditConsumerStore implements AuditConsumerStore {
         ],
       );
 
-      await connection.query('COMMIT');
       return { duplicate: false };
-    } catch (error) {
-      try {
-        await connection.query('ROLLBACK');
-      } catch {
-        // Preserve the original failure.
-      }
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 }

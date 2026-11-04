@@ -87,6 +87,25 @@ describe('Firebase ID tokens as customer credentials', () => {
     expect(principal.rows[0]).toEqual({ name: 'First Login', status: 'active' });
   });
 
+  it('provisions a user whose display name contains characters PostgreSQL rejects', async () => {
+    // A NUL in `text` is a hard PostgreSQL error; before sanitizing, this user's first sign-in
+    // failed with a 500 every time and the identity could never be provisioned.
+    const token = await signer.sign({ sub: 'uid-nul-name', name: 'Nul\u0000 Name' });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/accounts',
+      headers: bearer(token),
+    });
+    expect(response.statusCode).toBe(200);
+
+    const rows = await identityRows('uid-nul-name');
+    const principal = await pool.query<{ name: string }>(
+      'SELECT name FROM principals WHERE id = $1',
+      [rows[0]!.principal_id],
+    );
+    expect(principal.rows[0]!.name).toBe('Nul Name');
+  });
+
   it('turns 20 simultaneous first sign-ins into exactly one principal', async () => {
     const subject = 'uid-concurrent-first-login';
     const name = `concurrent-${Date.now()}`;

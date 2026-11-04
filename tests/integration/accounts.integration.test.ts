@@ -111,6 +111,51 @@ describe('accounts with PostgreSQL', () => {
     expect(body.accounts.map(({ currency }) => currency)).toEqual(['INR', 'USD']);
   });
 
+  it('pages through every owned account instead of silently truncating', async () => {
+    const caller = await createTestPrincipal(pool, 'list-pages');
+    const created: string[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/accounts',
+        headers: { ...caller.authHeaders },
+        payload: { currency: 'INR' },
+      });
+      created.push(response.json<{ id: string }>().id);
+    }
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const query: string = cursor ? `&cursor=${encodeURIComponent(cursor)}` : '';
+      const response = await app.inject({
+        method: 'GET',
+        url: `/v1/accounts?limit=2${query}`,
+        headers: { ...caller.authHeaders },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json<{ accounts: { id: string }[]; nextCursor: string | null }>();
+      seen.push(...body.accounts.map(({ id }) => id));
+      cursor = body.nextCursor;
+      pages += 1;
+      expect(pages).toBeLessThanOrEqual(10);
+    } while (cursor);
+
+    expect(pages).toBe(3); // 2 + 2 + 1
+    expect(seen).toEqual(created);
+  });
+
+  it('rejects a malformed account-list cursor with 400', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/accounts?cursor=not-a-cursor',
+      headers: { ...principal.authHeaders },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: 'INVALID_CURSOR' } });
+  });
+
   it('returns an empty list for a principal with no accounts, and 401 without a key', async () => {
     const fresh = await createTestPrincipal(pool, 'list-empty');
     const response = await app.inject({
@@ -119,7 +164,7 @@ describe('accounts with PostgreSQL', () => {
       headers: { ...fresh.authHeaders },
     });
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ accounts: [] });
+    expect(response.json()).toEqual({ accounts: [], nextCursor: null });
 
     const anonymous = await app.inject({ method: 'GET', url: '/v1/accounts' });
     expect(anonymous.statusCode).toBe(401);

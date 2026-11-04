@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import type { Database, DatabaseConnection, TransactionalDatabase } from '../../ports/database.js';
+import type { Database, TransactionalDatabase } from '../../ports/database.js';
+import { withTransaction } from '../../ports/transaction.js';
 import { IdempotencyError } from '../idempotency/idempotency-domain.js';
 import { outboxCurrentEventVersion, type OutboxStore } from '../outbox/outbox-domain.js';
 import type {
@@ -189,21 +190,11 @@ export class PostgresTransferStore implements TransferStore {
   public async runSerializable<T>(
     work: (transaction: TransferTransaction) => Promise<T>,
   ): Promise<T> {
-    const connection: DatabaseConnection = await this.database.connect();
-    try {
-      await connection.query('BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE');
-      const result = await work(new PostgresTransferTransaction(connection, this.outboxStore));
-      await connection.query('COMMIT');
-      return result;
-    } catch (error) {
-      try {
-        await connection.query('ROLLBACK');
-      } catch {
-        // Preserve the original transaction failure.
-      }
-      throw error;
-    } finally {
-      connection.release();
-    }
+    return await withTransaction(
+      this.database,
+      async (connection) =>
+        await work(new PostgresTransferTransaction(connection, this.outboxStore)),
+      { begin: 'BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE' },
+    );
   }
 }

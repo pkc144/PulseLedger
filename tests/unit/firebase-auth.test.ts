@@ -1,4 +1,4 @@
-import { generateKeyPair, SignJWT } from 'jose';
+import { errors, generateKeyPair, SignJWT } from 'jose';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { AppError } from '../../src/errors.js';
 import {
@@ -55,6 +55,7 @@ describe('Firebase ID token verification', () => {
     ['an empty subject', { sub: '' }],
     ['an oversized subject', { sub: 'x'.repeat(129) }],
     ['a missing auth_time', { auth_time: undefined }],
+    ['an iat in the future', { iat: Math.floor(Date.now() / 1000) + 600 }],
   ])('rejects %s with one generic 401', async (_label, claims) => {
     const error = await rejection(verify(await signer.sign(claims)));
     expect(error).toMatchObject({
@@ -93,6 +94,23 @@ describe('Firebase ID token verification', () => {
       projectId: testFirebaseProjectId,
     });
     const error = await rejection(offline(await signer.sign()));
+    expect(error).toMatchObject({ code: 'AUTH_PROVIDER_UNAVAILABLE', statusCode: 503 });
+  });
+
+  // jose reports a non-200 key-set response as a bare JOSEError and a malformed one as
+  // JWKSInvalid. Both say nothing about the caller's token, so neither may become a 401.
+  it.each([
+    ['a non-200 key-set response', () => new errors.JOSEError('Expected 200 OK')],
+    ['a malformed key set', () => new errors.JWKSInvalid('JSON Web Key Set malformed')],
+    ['a key-set timeout', () => new errors.JWKSTimeout()],
+  ])('answers 503 for %s', async (_label, failure) => {
+    const broken = createFirebaseTokenVerifier({
+      keys: async () => {
+        throw failure();
+      },
+      projectId: testFirebaseProjectId,
+    });
+    const error = await rejection(broken(await signer.sign()));
     expect(error).toMatchObject({ code: 'AUTH_PROVIDER_UNAVAILABLE', statusCode: 503 });
   });
 });
@@ -171,5 +189,33 @@ describe('AuthService.authenticateIdentity', () => {
       displayName: 'A'.repeat(300),
     });
     expect(principal.name).toHaveLength(128);
+  });
+
+  it('strips characters PostgreSQL cannot store from a display name', async () => {
+    const store = new MemoryAuthStore();
+    const principal = await service(store).authenticateIdentity({
+      ...identity,
+      displayName: 'Ada\u0000 Love\u0007lace',
+    });
+    expect(principal.name).toBe('Ada Lovelace');
+  });
+
+  it('never cuts a display name through the middle of an emoji', async () => {
+    const store = new MemoryAuthStore();
+    const principal = await service(store).authenticateIdentity({
+      ...identity,
+      displayName: `${'a'.repeat(127)}😀😀`,
+    });
+    expect(principal.name).toBe(`${'a'.repeat(127)}😀`);
+    expect(principal.name).not.toMatch(/\p{Cs}/u);
+  });
+
+  it('falls back to the email when the display name is only unstorable characters', async () => {
+    const store = new MemoryAuthStore();
+    const principal = await service(store).authenticateIdentity({
+      ...identity,
+      displayName: '\u0000\u0000',
+    });
+    expect(principal.name).toBe('ada@example.com');
   });
 });

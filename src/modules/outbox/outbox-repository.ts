@@ -1,4 +1,5 @@
-import type { Database, DatabaseConnection, TransactionalDatabase } from '../../ports/database.js';
+import type { Database, TransactionalDatabase } from '../../ports/database.js';
+import { withTransaction } from '../../ports/transaction.js';
 import {
   outboxCurrentEventVersion,
   outboxDefaultClaimLeaseSeconds,
@@ -79,9 +80,7 @@ export class PostgresOutboxStore implements OutboxStore {
   }
 
   public async claimBatch(batchSize: number): Promise<OutboxRecord[]> {
-    const connection: DatabaseConnection = await this.database.connect();
-    try {
-      await connection.query('BEGIN');
+    return await withTransaction(this.database, async (connection) => {
       const result = await connection.query<OutboxRow>(
         `WITH claimed AS (
            SELECT id
@@ -101,18 +100,8 @@ export class PostgresOutboxStore implements OutboxStore {
                    status, attempts, last_error, next_attempt_at, processed_at, created_at`,
         [batchSize, this.claimLeaseSeconds],
       );
-      await connection.query('COMMIT');
       return result.rows.map(toOutboxRecord);
-    } catch (error) {
-      try {
-        await connection.query('ROLLBACK');
-      } catch {
-        // Preserve the original failure.
-      }
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 
   public async markProcessed(id: string): Promise<void> {

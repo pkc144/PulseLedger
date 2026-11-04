@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type pg from 'pg';
+import { withTransaction } from '../../ports/transaction.js';
 
 const migrationFilePattern = /^\d+_[a-z0-9_]+\.sql$/;
 
@@ -20,17 +21,9 @@ export async function runMigrations(pool: pg.Pool, directory = path.resolve('mig
     if (appliedNames.has(file)) continue;
 
     const sql = await readFile(path.join(directory, file), 'utf8');
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
+    await withTransaction(pool, async (client) => {
       await client.query(sql);
       await client.query('INSERT INTO schema_migrations (name) VALUES ($1)', [file]);
-      await client.query('COMMIT');
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   }
 }

@@ -1,8 +1,10 @@
 import { initializeApp } from 'firebase/app';
 import {
   GoogleAuthProvider,
+  browserPopupRedirectResolver,
+  browserSessionPersistence,
   createUserWithEmailAndPassword,
-  getAuth,
+  initializeAuth,
   onAuthStateChanged,
   sendEmailVerification,
   sendPasswordResetEmail,
@@ -16,15 +18,28 @@ import { useEffect, useState } from 'react';
 
 const env = import.meta.env;
 
-/** Firebase sign-in is offered only when the web config is present (see web/.env.example). */
+/**
+ * Firebase sign-in is offered only when the web config is present (see web/.env.example).
+ *
+ * Session persistence, not Firebase's default (IndexedDB, which survives closing the browser):
+ * customer credentials die with the tab, exactly like a pasted API key (see session.ts). With the
+ * default, the next person at a shared machine would open /app already signed in as the previous
+ * customer -- and able to move their money. Set at initialization, so no persisted session is
+ * ever restored first.
+ */
 export const auth: Auth | null = env.VITE_FIREBASE_API_KEY
-  ? getAuth(
+  ? initializeAuth(
       initializeApp({
         apiKey: env.VITE_FIREBASE_API_KEY,
         authDomain: env.VITE_FIREBASE_AUTH_DOMAIN,
         projectId: env.VITE_FIREBASE_PROJECT_ID,
         appId: env.VITE_FIREBASE_APP_ID,
       }),
+      {
+        persistence: browserSessionPersistence,
+        // Required by signInWithPopup when Auth is created with initializeAuth.
+        popupRedirectResolver: browserPopupRedirectResolver,
+      },
     )
   : null;
 

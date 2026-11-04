@@ -223,8 +223,12 @@ enters through a journaled treasury posting (`/v1/admin/fund`).
 
 ## `GET /v1/accounts`
 
-Lists the caller's own accounts, oldest first, capped at 100. Treasuries and other principals'
-accounts never appear — the ownership filter is in the SQL, exactly as for the single-account read.
+Lists the caller's own accounts, oldest first. Treasuries and other principals' accounts never
+appear — the ownership filter is in the SQL, exactly as for the single-account read.
+
+Keyset-paginated like journal entries: `limit` defaults to 100 (also the maximum), and
+`nextCursor` is an opaque string to pass back as `?cursor=`, or `null` on the last page — a long
+list is never silently cut short. A malformed cursor is `400 INVALID_CURSOR`.
 
 ```json
 {
@@ -236,11 +240,12 @@ accounts never appear — the ownership filter is in the SQL, exactly as for the
       "balanceMinor": "250000",
       "createdAt": "2026-08-16T10:29:20.116Z"
     }
-  ]
+  ],
+  "nextCursor": null
 }
 ```
 
-A principal with no accounts gets `{ "accounts": [] }`.
+A principal with no accounts gets `{ "accounts": [], "nextCursor": null }`.
 
 ## `GET /v1/accounts/:id`
 

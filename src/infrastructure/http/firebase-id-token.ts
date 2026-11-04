@@ -52,20 +52,25 @@ export function createFirebaseTokenVerifier(
         requiredClaims: ['sub', 'iat', 'exp', 'auth_time'],
       }));
     } catch (error) {
-      if (error instanceof errors.JWKSTimeout || !(error instanceof errors.JOSEError)) {
-        throw new AppError(
-          'AUTH_PROVIDER_UNAVAILABLE',
-          503,
-          'Identity provider keys are unavailable; retry shortly',
-        );
-      }
-      throw invalidToken();
+      // Only errors that describe the *token* are the caller's fault. Everything else -- a JWKS
+      // timeout, a non-200 or malformed key-set response (jose raises those as a generic
+      // JOSEError / JWKSInvalid), or a network failure -- means the keys could not be obtained,
+      // and the caller's credential may be perfectly good.
+      if (isTokenError(error)) throw invalidToken();
+      throw new AppError(
+        'AUTH_PROVIDER_UNAVAILABLE',
+        503,
+        'Identity provider keys are unavailable; retry shortly',
+      );
     }
 
-    const authTime = payload.auth_time;
+    // jose checks `iat` against the clock only when `maxTokenAge` is set, so "issued in the
+    // past" is enforced here, alongside `auth_time`.
     const nowSeconds = Math.floor(Date.now() / 1000);
-    if (typeof authTime !== 'number' || authTime > nowSeconds + clockTolerance) {
-      throw invalidToken();
+    for (const claim of [payload.iat, payload.auth_time]) {
+      if (typeof claim !== 'number' || claim > nowSeconds + clockTolerance) {
+        throw invalidToken();
+      }
     }
     const subject = payload.sub;
     if (typeof subject !== 'string' || subject.length === 0 || subject.length > maxSubjectLength) {
@@ -80,6 +85,23 @@ export function createFirebaseTokenVerifier(
       subject,
     };
   };
+}
+
+/** jose errors raised by the token itself: its shape, its claims, its algorithm, its signature. */
+const tokenErrorTypes = [
+  errors.JOSEAlgNotAllowed,
+  errors.JOSENotSupported,
+  errors.JWKSMultipleMatchingKeys,
+  errors.JWKSNoMatchingKey,
+  errors.JWSInvalid,
+  errors.JWSSignatureVerificationFailed,
+  errors.JWTClaimValidationFailed,
+  errors.JWTExpired,
+  errors.JWTInvalid,
+];
+
+function isTokenError(error: unknown): boolean {
+  return tokenErrorTypes.some((type) => error instanceof type);
 }
 
 function invalidToken(): AppError {

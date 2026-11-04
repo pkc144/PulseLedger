@@ -65,7 +65,10 @@ export class AuthService implements AuthApplication {
 
     const principal =
       (await this.store.findPrincipalByIdentity(identity.provider, identity.subject)) ??
-      (await this.store.createPrincipalForIdentity(identity, principalNameFor(identity)));
+      (await this.store.createPrincipalForIdentity(
+        { ...identity, email: sanitizeProviderText(identity.email, identityEmailMaxLength) },
+        principalNameFor(identity),
+      ));
 
     // Same single message as a bad API key: disabling a principal locks out every way in.
     if (principal.status !== 'active') {
@@ -97,8 +100,29 @@ export class AuthService implements AuthApplication {
   }
 }
 
+/**
+ * Makes provider-supplied text safe to store. A display name is whatever the user typed into
+ * their Google/Firebase profile: control characters (NUL in particular, which PostgreSQL rejects
+ * in `text`, failing every sign-in for that identity) and lone surrogates are dropped, and the
+ * result is cut by code point, never through the middle of an emoji.
+ */
+export function sanitizeProviderText(value: string | null, maxLength: number): string | null {
+  if (value === null) return null;
+  const cleaned = Array.from(value.normalize('NFC'))
+    .filter((char) => !/[\p{Cc}\p{Cs}]/u.test(char))
+    .slice(0, maxLength)
+    .join('')
+    .trim();
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+/** Matches the `principal_identities.email` CHECK (RFC 5321's practical limit). */
+const identityEmailMaxLength = 320;
+
 function principalNameFor(identity: ExternalIdentity): string {
-  const name =
-    identity.displayName?.trim() || identity.email || `${identity.provider}:${identity.subject}`;
-  return name.slice(0, principalNameMaxLength);
+  return (
+    sanitizeProviderText(identity.displayName, principalNameMaxLength) ??
+    sanitizeProviderText(identity.email, principalNameMaxLength) ??
+    `${identity.provider}:${identity.subject}`.slice(0, principalNameMaxLength)
+  );
 }

@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-- **`GET /v1/accounts`** lists the caller's own accounts (oldest first, capped at 100), with the
-  same SQL-level ownership filter as the single-account read. Treasuries never appear.
+- **`GET /v1/accounts`** lists the caller's own accounts (oldest first, keyset-paginated with
+  `limit` ≤ 100 and an opaque `nextCursor`), with the same SQL-level ownership filter as the
+  single-account read. Treasuries never appear.
 - **Sign in with Firebase** — Google and email/password. With `FIREBASE_PROJECT_ID` set, the
   customer guard accepts Firebase ID tokens alongside API keys, verified against Google's public
   keys (no service account). First sign-in provisions a principal via `principal_identities`
@@ -15,6 +16,25 @@
 
 ### Fixes
 
+- **Web: a refused transfer no longer replays forever.** After a final `4xx` (e.g.
+  `INSUFFICIENT_FUNDS`, which the server stores as the key's answer), the Send form now starts a
+  new idempotency key, so resending after the cause is fixed actually retries.
+- **Web: admin funding sends an `Idempotency-Key`.** A retry after a timeout could credit the
+  account twice; the Fund form now uses the same per-intent key as Send money.
+- **Web: Firebase sessions die with the tab**, like API keys. Firebase's default IndexedDB
+  persistence let the next person at a shared machine open `/app` as the previous customer.
+- **Firebase: a key-set outage is a `503`, not a `401`.** A non-200 or malformed JWKS response
+  told clients their valid token was bad. Only token-shaped errors now map to `401`.
+- **Firebase: `iat` must be in the past**, as Firebase documents; jose only checks it with
+  `maxTokenAge`, so it is now checked explicitly alongside `auth_time`.
+- **Firebase: display names are sanitized** — control characters (a NUL failed every first sign-in
+  with a `500`) and lone surrogates are dropped, and names are cut by code point.
+- **`GET /v1/accounts` paginates** (`limit`, `nextCursor`) instead of silently truncating at 100;
+  the web client follows every page.
+- Web: the ledger-history error banner clears when a later load succeeds.
+- Every transaction now goes through one `withTransaction` helper (`src/ports/transaction.ts`),
+  which also releases a connection whose `ROLLBACK` failed _with_ the error, so the pool destroys
+  it instead of reusing a connection in an unknown state.
 - **One idempotency key could post two transfers.** Reclaiming a stale `in_progress` claim ran an
   `UPDATE` without checking it matched, then proceeded on a re-read — so every concurrent reclaimer
   proceeded, and each posted its own transfer. Reclaim is now `UPDATE ... RETURNING` and only the
