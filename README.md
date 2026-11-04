@@ -113,6 +113,17 @@ npm run db:migrate
 npm run dev                                # http://localhost:3000
 ```
 
+Then the web frontend, in a second terminal:
+
+```bash
+npm --prefix web ci
+npm run web:dev                            # http://localhost:5173
+```
+
+It opens on a landing page; **User Login** takes Google, email/password, or a customer API key, and
+**Admin Login** takes `ADMIN_API_KEY` and opens the operator console. Google and email sign-in need
+a Firebase project — see [web/README.md](./web/README.md); API keys work without one.
+
 Every command reads `.env` automatically (Node's `--env-file-if-exists`), so nothing needs exporting.
 Real environment variables still win, which is how the container and CI supply configuration.
 
@@ -262,6 +273,9 @@ npm run outbox list        # parked events waiting on a human; `show <id>` / `re
 npm run retention -- --dry-run   # preview what a retention sweep would delete
 npm run seed               # realistic dataset via the real services (SEED_ACCOUNTS / SEED_TRANSFERS)
 ./scripts/demo.sh          # the four-invariant demonstration, ~8 seconds
+npm run web:dev            # web frontend on :5173 (proxies /v1 and /health to :3000)
+npm run web:test           # frontend tests: money parsing/formatting, by example and property
+npm run web:build          # typecheck + production bundle in web/dist
 npm run build && npm start # production build and run
 ```
 
@@ -305,6 +319,7 @@ tests/                     unit · property · integration (concurrency, recover
 benchmarks/k6/             four scenarios, raw output, and RESULTS.md
 scripts/                   architecture checker · seeder · demo.sh
 docs/                      ARCHITECTURE · API · TESTING · TRADEOFFS · DEMO · adr/ · diagrams/
+web/                       React + Vite frontend: landing page, logins, dashboard, admin console
 ```
 
 `npm run architecture:check` fails the build if a dependency crosses a module boundary the wrong way.

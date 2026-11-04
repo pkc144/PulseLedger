@@ -71,6 +71,17 @@ their own principal on first sign-in, so their accounts are private to them.
 - The admin console only knows about principals and keys created in the current page session: the
   API has no endpoint to list them.
 
+## Test
+
+```bash
+npm test             # money.ts by example and by property (fast-check), amounts up to 10^30
+```
+
+`src/lib/money.ts` is the only place the UI changes an amount's shape, so it carries the tests:
+formatting never adds or drops a digit, INR and USD group differently but hold identical digits,
+parse ∘ format is the identity, and the parser returns only `null` or a schema-valid amount for any
+input at all. Swapping in `Number(input) * 100` or Western grouping for INR fails the suite.
+
 ## Build
 
 ```bash

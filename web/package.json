@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Browser UI for the PulseLedger API: customer dashboard and admin console.",
+  "description": "The PulseLedger web frontend: landing page, user and admin login, customer dashboard, and admin console.",
   "engines": {
     "node": ">=22.9.0"
   },
@@ -11,7 +11,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "firebase": "13.2.0",
@@ -24,8 +25,10 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.2.1",
+    "fast-check": "4.3.0",
     "tailwindcss": "4.3.4",
     "typescript": "7.0.2",
-    "vite": "8.3.5"
+    "vite": "8.3.5",
+    "vitest": "5.1.0"
   }
 }
