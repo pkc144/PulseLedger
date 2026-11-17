@@ -4,7 +4,7 @@
 
 PulseLedger is a correctness-first payment ledger implemented as a **modular monolith** backed by one PostgreSQL database. This document is the implementation contract for new project work. [PROJECT_PLAN.md](../PROJECT_PLAN.md) defines delivery order and scope; this document defines boundaries and dependency direction.
 
-As of `v1.1.0` the repository implements the foundation, account API, immutable double-entry journal, treasury funding, serializable customer transfers, request idempotency with stable response replay, a transactional outbox drained by a background worker, an idempotent audit consumer fed by that worker, independent balance reconciliation, cursor-paginated journal entries, API-key authentication with database-enforced account ownership, API-key-protected administrative routes, log redaction, and bounded request limits, all verified against real `EXPLAIN ANALYZE` output and real k6 load (`benchmarks/k6/RESULTS.md`). Diagrams of the structures described here: [diagrams/architecture.md](./diagrams/architecture.md) and [diagrams/transfer-flow.md](./diagrams/transfer-flow.md).
+As of `v1.2.1` the repository implements the foundation, account API, immutable double-entry journal, treasury funding, serializable customer transfers, request idempotency with stable response replay, a transactional outbox drained by a background worker, an idempotent audit consumer fed by that worker, independent balance reconciliation, cursor-paginated journal entries, API-key authentication with database-enforced account ownership, API-key-protected administrative routes, log redaction, and bounded request limits, all verified against real `EXPLAIN ANALYZE` output and real k6 load (`benchmarks/k6/RESULTS.md`). `v1.2.x` adds dead-letter replay, retention, and Prometheus metrics. Unreleased work on `main` adds Firebase ID tokens as a second customer credential ([ADR-007](./adr/007-firebase-id-tokens-as-customer-credentials.md)), owner-scoped account listing (`GET /v1/accounts`), and one shared transaction helper (`src/ports/transaction.ts`). Diagrams of the structures described here: [diagrams/architecture.md](./diagrams/architecture.md) and [diagrams/transfer-flow.md](./diagrams/transfer-flow.md).
 
 ## Current system context
 
@@ -18,7 +18,7 @@ Fastify application (single deployable process)
     | feature ports and transaction-oriented use cases
     v
 PostgreSQL (single source of durable state)
-    |- principals and hashed API keys
+    |- principals, hashed API keys, and external-identity mappings (Firebase)
     |- accounts and cached balances (each owned by a principal)
     |- immutable ledger transactions and journal entries
     |- completed transfer projections
@@ -78,7 +78,7 @@ composition root: app.ts (constructs adapters and injects ports)
 - `*-service.ts` implements application behavior using injected feature ports. It cannot import routes, repositories, or infrastructure.
 - `*-routes.ts` is an inbound HTTP adapter. It validates transport data and calls an injected application interface from `*-domain.ts`; it never imports a concrete service or repository.
 - `*-repository.ts` is an outbound persistence adapter. It implements a feature-owned port with explicit SQL and may depend on the generic database port.
-- `src/ports/` contains small technology-neutral boundaries shared by multiple features. It must not become a miscellaneous utility directory.
+- `src/ports/` contains small technology-neutral boundaries shared by multiple features. It must not become a miscellaneous utility directory. `ports/database.ts` is the minimal `query`/`connect`/`release` contract; `ports/transaction.ts` exports `withTransaction`, the **single home for BEGIN/COMMIT/ROLLBACK**. Every repository that needs a transaction (transfers at `SERIALIZABLE`, outbox claims, audit consumption, first-time identity provisioning) goes through it, so all of them get the same two guarantees: the original error always wins over a failed `ROLLBACK`, and a connection whose `ROLLBACK` failed is released _with_ the error so the pool destroys it instead of reusing a connection in an unknown state.
 - `src/infrastructure/` owns generic technology setup such as the PostgreSQL pool and migration runner. It does not own business rules and cannot depend on feature modules.
 - `src/app.ts` is the HTTP composition root. It is allowed to know concrete adapters and wires them to routes.
 - `src/server.ts` and other process entrypoints load configuration, acquire resources, start work, and shut resources down. Business behavior does not live there.
@@ -97,6 +97,10 @@ request -> account route -> AccountApplication -> AccountService -> AccountStore
 ```
 
 The route owns HTTP status codes and schemas. The repository owns SQL and row mapping. The domain contract keeps those concerns independently testable.
+
+### Current account listing
+
+`GET /v1/accounts` returns the caller's own customer accounts (never a treasury), oldest first. The ownership filter is in the `WHERE` clause (`owner_principal_id = $1 AND is_treasury = false`), served by `accounts_owner_idx`. It is keyset-paginated on `(created_at, id)` with `limit` ≤ 100: the query fetches `limit + 1` rows to learn whether another page exists, and returns an opaque `nextCursor` built from PostgreSQL's own microsecond-precision rendering of `created_at` (the same technique as journal-entry pagination below).
 
 ### Current journal entries pagination
 
@@ -164,6 +168,25 @@ request -> onRequest guard -> AuthApplication.authenticate(secret)
 
 Only a SHA-256 hash of a secret is stored; the secret itself is returned once, by the call that issued it. Every failure mode returns the same `401 UNAUTHORIZED`, so a caller cannot tell an unknown key from a revoked one.
 
+When `FIREBASE_PROJECT_ID` is set, the same `Authorization: Bearer` slot also accepts a **Firebase ID token** (Google or email/password sign-in). The composition root routes by shape: a secret starting with `pl_live_` takes the API-key path; anything else is verified as a Firebase token. With Firebase off, every bearer takes the API-key path exactly as before.
+
+```text
+Bearer <not pl_live_...> -> verifyFirebaseToken (infrastructure/http/firebase-id-token.ts)
+                            |- RS256 signature against Google's published JWKS (jose, cached)
+                            |- iss = https://securetoken.google.com/<project>, aud = <project>
+                            |- exp in the future; iat and auth_time in the past; sub 1-128 chars
+                            `- key-set fetch failure -> 503 AUTH_PROVIDER_UNAVAILABLE, not 401
+                         -> AuthApplication.authenticateIdentity(identity)
+                            |- email not verified -> 403 EMAIL_NOT_VERIFIED, nothing created
+                            |- principal_identities lookup by (provider, subject)
+                            |- first sign-in: principal + mapping in one transaction;
+                            |  a concurrent first sign-in loses on the primary key, rolls back
+                            |  its own principal, and returns the winner's
+                            `- disabled principal -> the same generic 401
+```
+
+Past the guard, a Firebase user is just a principal: ownership, idempotency scoping, and every query are unchanged. No service account or Admin SDK is used, only Google's public keys. See [ADR-007](./adr/007-firebase-id-tokens-as-customer-credentials.md).
+
 ### Current idempotent monetary command
 
 An idempotent transfer request extends the transaction boundary to claim or replay an idempotency record before mutation and commits its stable response atomically with the transfer.
@@ -198,7 +221,7 @@ Because delivery is at-least-once but the claim is a unique-constraint insert, t
 
 ## Data and correctness rules
 
-These rules outrank convenience and performance. All nine rules are enforced now.
+These rules outrank convenience and performance. All ten rules are enforced now.
 
 1. Monetary values are integer minor units in PostgreSQL `bigint`; JSON exposes them as decimal strings.
 2. Every posted ledger transaction has total debits equal to total credits in one currency.
@@ -209,6 +232,7 @@ These rules outrank convenience and performance. All nine rules are enforced now
 7. Journal rows, cached balances, idempotency completion, and outbox creation commit atomically.
 8. Each outbox event produces at most one logical consumer effect.
 9. Every customer account has exactly one owning principal, fixed for the life of the account.
+10. An external identity (provider + subject) maps to exactly one principal, permanently.
 
 Enforce an invariant in PostgreSQL whenever practical, then test it at the database boundary. TypeScript validation alone is not a sufficient financial control.
 
@@ -216,6 +240,8 @@ Enforce an invariant in PostgreSQL whenever practical, then test it at the datab
 
 ```text
 principals (identity) 1 ---- * api_keys (prefix + sha256 hash, revocable)
+    |    1
+    |    `---- 0..1 principal_identities (provider + subject PK, immutable; Firebase)
     |
     | owns (immutable, NOT NULL for customer accounts)
     v
@@ -243,7 +269,7 @@ journal_entries * -------- 1 ledger_transactions 1 -------- 0..1 transfers
 - Domain/application code must not depend on Fastify reply objects or status codes.
 - Liveness reports process health without querying PostgreSQL. Readiness verifies required dependencies and reports outbox backlog counts.
 - Secrets, API keys, idempotency payloads, and sensitive request bodies must not be logged. Pino `redact` (`src/infrastructure/http/logging.ts`) is applied whenever logging is enabled, covering `authorization`, `x-admin-api-key`, and `cookie`/`set-cookie` headers regardless of whether Fastify's own request logging currently serializes headers, so a future call that logs them stays safe by construction.
-- Customer routes (`/v1/accounts*`, `/v1/transfers*`) require `Authorization: Bearer <api key>`; administrative routes require `x-admin-api-key`. Both guards are constant-time comparisons wired only at the composition root, each around its own encapsulated child context, so route files stay unaware that authentication exists. The two credentials are not interchangeable, and only health endpoints are unauthenticated.
+- Customer routes (`/v1/accounts*`, `/v1/transfers*`) require `Authorization: Bearer <api key or Firebase ID token>`; administrative routes require `x-admin-api-key`. Both guards are constant-time comparisons wired only at the composition root, each around its own encapsulated child context, so route files stay unaware that authentication exists. The two credentials are not interchangeable, and only health endpoints are unauthenticated.
 - Both guards run on Fastify's `onRequest` hook, **before** body parsing and schema validation. On `preHandler` (which runs after validation) an anonymous caller would receive schema feedback as a 400 and could map request shapes without a credential.
 - Authorization is account ownership: `accounts.owner_principal_id` is `NOT NULL` for customer accounts, immutable, and checked against the row locked inside the transfer transaction. A resource owned by another principal answers `404`, never `403`, so the API cannot be used to enumerate accounts or transfers. See [ADR-005](./adr/005-api-key-authentication-account-ownership.md).
 - Request size, connection, keep-alive, and total-request timeouts are explicit Fastify constructor options (`bodyLimit`, `connectionTimeout`, `keepAliveTimeout`, `requestTimeout`), configurable via `REQUEST_BODY_LIMIT_BYTES`/`CONNECTION_TIMEOUT_MS`/`KEEP_ALIVE_TIMEOUT_MS`/`REQUEST_TIMEOUT_MS` with bounded defaults rather than Fastify's larger built-in defaults.
@@ -291,4 +317,4 @@ A feature is complete only when its relevant rejection, concurrency, and failure
 6. Wire concrete services and adapters only in a composition root or process entrypoint.
 7. Add migrations and tests that demonstrate the invariants, then update this document if the architecture contract changes.
 
-Material architectural decisions are recorded in [`docs/adr/`](./adr/README.md). The four v1 records cover double-entry integer accounting, serializable locking/retries, the transactional outbox, and the modular-monolith worker boundary; a change that invalidates one of them needs a new ADR, not an edit to the old one.
+Material architectural decisions are recorded in [`docs/adr/`](./adr/README.md). The four v1 records cover double-entry integer accounting, serializable locking/retries, the transactional outbox, and the modular-monolith worker boundary; ADR-005 to ADR-007 cover API-key authentication and ownership, retention and replay, and Firebase sign-in. A change that invalidates one of them needs a new ADR, not an edit to the old one.

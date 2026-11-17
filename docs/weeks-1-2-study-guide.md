@@ -10,6 +10,9 @@ A deep, honest walkthrough of everything built in **Week 1 (foundation + account
 > **Drill set:** a full question bank with detailed answers lives in
 > [`weeks-1-2-interview-qa.md`](./weeks-1-2-interview-qa.md) — this guide is the narrative, that file
 > is the practice set.
+>
+> **Next:** weeks 3–8 and everything after (transfers, idempotency, outbox, auth, ops, Firebase)
+> continue in [`weeks-3-8-study-guide.md`](./weeks-3-8-study-guide.md).
 
 ---
 

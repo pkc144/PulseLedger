@@ -216,6 +216,30 @@ test you can run by name.
 | Ownership is immutable in SQL                   | `tests/integration/auth.integration.test.ts` → _rejects a change of ownership at the database boundary_                                                                               |
 | No customer account can exist unowned           | `tests/integration/auth.integration.test.ts` → _refuses to create a customer account with no owner_                                                                                   |
 
+### Firebase sign-in (ADR-007, unreleased)
+
+These tests were added after the `v1.2.0` inventory above, so they aren't included in its counts.
+
+| Evidence                                        | Test                                                                                                                                                         |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Signature, issuer, audience, algorithm checked  | `tests/unit/firebase-auth.test.ts` → _rejects a token signed by a key Google did not publish_ · _rejects a symmetric (HS256) token even with a matching kid_ |
+| Key-set outage is not the caller's fault        | `tests/unit/firebase-auth.test.ts` → _answers 503, not 401, when Google’s signing keys cannot be fetched_                                                    |
+| First sign-in provisions once, then reuses      | `tests/integration/firebase-auth.integration.test.ts` → _provisions a principal on first sign-in and keeps the same one on every later sign-in_              |
+| **Concurrent first sign-ins → one principal**   | `tests/integration/firebase-auth.integration.test.ts` → _turns 20 simultaneous first sign-ins into exactly one principal_                                    |
+| Unverified email refused, nothing created       | `tests/integration/firebase-auth.integration.test.ts` → _refuses an unverified email with 403 and creates nothing_                                           |
+| Firebase users isolated like API-key principals | `tests/integration/firebase-auth.integration.test.ts` → _isolates Firebase users from each other exactly like API-key principals_                            |
+| Disabling a principal locks out Firebase too    | `tests/integration/firebase-auth.integration.test.ts` → _locks out a Firebase user whose principal is disabled_                                              |
+| Identity mapping immutable in SQL               | `tests/integration/firebase-auth.integration.test.ts` → _rejects repointing or deleting an identity mapping at the database boundary_                        |
+| Hostile display names stored safely             | `tests/integration/firebase-auth.integration.test.ts` → _provisions a user whose display name contains characters PostgreSQL rejects_                        |
+
+### Account listing and transaction lifecycle (unreleased)
+
+| Evidence                                          | Test                                                                                                                          |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Only own accounts, oldest first, never a treasury | `tests/integration/accounts.integration.test.ts` → _lists only the caller’s own accounts, oldest first, and never a treasury_ |
+| Pagination never silently truncates               | `tests/integration/accounts.integration.test.ts` → _pages through every owned account instead of silently truncating_         |
+| Original error survives a failed ROLLBACK         | `tests/unit/transaction.test.ts` → _keeps the original error and destroys the connection when ROLLBACK also fails_            |
+
 ### Hardening
 
 | Evidence                         | Test                                                                                                                                         |
